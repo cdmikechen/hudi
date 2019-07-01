@@ -24,6 +24,7 @@ import com.beust.jcommander.IStringConverter;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
+import com.google.common.base.Preconditions;
 import com.uber.hoodie.HoodieWriteClient;
 import com.uber.hoodie.OverwriteWithLatestAvroPayload;
 import com.uber.hoodie.SimpleKeyGenerator;
@@ -44,7 +45,6 @@ import com.uber.hoodie.utilities.sources.JsonDFSSource;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -253,23 +253,26 @@ public class HoodieDeltaStreamer implements Serializable {
         + "https://spark.apache.org/docs/latest/job-scheduling.html")
     public Integer compactSchedulingMinShare = 0;
 
+    /**
+     * Compaction is enabled for MoR table by default. This flag disables it
+     */
+    @Parameter(names = {"--disable-compaction"}, description = "Compaction is enabled for MoR table by default."
+        + "This flag disables it ")
+    public Boolean forceDisableCompaction = false;
+
     @Parameter(names = {"--help", "-h"}, help = true)
     public Boolean help = false;
-  }
 
-  /**
-   * Helper to set Spark Scheduling Configs dynamically
-   *
-   * @param cfg Config
-   */
-  public static Map<String, String> getSparkSchedulingConfigs(Config cfg) throws Exception {
-    Map<String, String> additionalSparkConfigs = new HashMap<>();
-    if (cfg.continuousMode && cfg.storageType.equals(HoodieTableType.MERGE_ON_READ.name())) {
-      String sparkSchedulingConfFile = SchedulerConfGenerator.generateAndStoreConfig(cfg.deltaSyncSchedulingWeight,
-          cfg.compactSchedulingWeight, cfg.deltaSyncSchedulingMinShare, cfg.compactSchedulingMinShare);
-      additionalSparkConfigs.put("spark.scheduler.allocation.file", sparkSchedulingConfFile);
+
+    public boolean isAsyncCompactionEnabled() {
+      return continuousMode && !forceDisableCompaction
+          && HoodieTableType.MERGE_ON_READ.equals(HoodieTableType.valueOf(storageType));
     }
-    return additionalSparkConfigs;
+
+    public boolean isInlineCompactionEnabled() {
+      return !continuousMode && !forceDisableCompaction
+          && HoodieTableType.MERGE_ON_READ.equals(HoodieTableType.valueOf(storageType));
+    }
   }
 
   public static void main(String[] args) throws Exception {
@@ -280,17 +283,11 @@ public class HoodieDeltaStreamer implements Serializable {
       System.exit(1);
     }
 
-    Map<String, String> additionalSparkConfigs = getSparkSchedulingConfigs(cfg);
+    Map<String, String> additionalSparkConfigs = SchedulerConfGenerator.getSparkSchedulingConfigs(cfg);
     JavaSparkContext jssc = UtilHelpers.buildSparkContext("delta-streamer-" + cfg.targetTableName,
         cfg.sparkMaster, additionalSparkConfigs);
-    if (!("FAIR".equals(jssc.getConf().get("spark.scheduler.mode")))
-        && cfg.continuousMode && cfg.storageType.equals(HoodieTableType.MERGE_ON_READ.name())) {
-      log.warn("Job Scheduling Configs will not be in effect as spark.scheduler.mode "
-          + "is not set to FAIR at instatiation time. Continuing without scheduling configs");
-    }
     new HoodieDeltaStreamer(cfg, jssc).sync();
   }
-
 
   /**
    * Syncs data either in single-run or in continuous mode.
@@ -347,6 +344,9 @@ public class HoodieDeltaStreamer implements Serializable {
         HoodieTableMetaClient meta = new HoodieTableMetaClient(
             new Configuration(fs.getConf()), cfg.targetBasePath, false);
         tableType = meta.getTableType();
+        // This will guarantee there is no surprise with table type
+        Preconditions.checkArgument(tableType.equals(HoodieTableType.valueOf(cfg.storageType)),
+            "Hoodie table is of type " + tableType + " but passed in CLI argument is " + cfg.storageType);
       } else {
         tableType = HoodieTableType.valueOf(cfg.storageType);
       }
@@ -372,7 +372,7 @@ public class HoodieDeltaStreamer implements Serializable {
       ExecutorService executor = Executors.newFixedThreadPool(1);
       return Pair.of(CompletableFuture.supplyAsync(() -> {
         boolean error = false;
-        if (cfg.continuousMode && tableType.equals(HoodieTableType.MERGE_ON_READ)) {
+        if (cfg.isAsyncCompactionEnabled()) {
           // set Scheduler Pool.
           log.info("Setting Spark Pool name for delta-sync to " + SchedulerConfGenerator.DELTASYNC_POOL_NAME);
           jssc.setLocalProperty("spark.scheduler.pool", SchedulerConfGenerator.DELTASYNC_POOL_NAME);
@@ -417,7 +417,7 @@ public class HoodieDeltaStreamer implements Serializable {
      * @return
      */
     protected Boolean onInitializingWriteClient(HoodieWriteClient writeClient) {
-      if (tableType.equals(HoodieTableType.MERGE_ON_READ)) {
+      if (cfg.isAsyncCompactionEnabled()) {
         asyncCompactService = new AsyncCompactService(jssc, writeClient);
         // Enqueue existing pending compactions first
         HoodieTableMetaClient meta = new HoodieTableMetaClient(
