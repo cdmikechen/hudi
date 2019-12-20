@@ -175,7 +175,9 @@ public class HoodieCommitMetadata implements Serializable {
     long totalInsertRecordsWritten = 0;
     for (List<HoodieWriteStat> stats : partitionToWriteStats.values()) {
       for (HoodieWriteStat stat : stats) {
-        if (stat.getPrevCommit() != null && stat.getPrevCommit().equalsIgnoreCase("null")) {
+        //-- if (stat.getPrevCommit() != null && stat.getPrevCommit().equalsIgnoreCase("null")) {
+        // It was only possible to determine the number of rows to insert for the first commit before. Currently, this problem is fixed
+        if (stat.getPrevCommit() != null) {
           totalInsertRecordsWritten += stat.getNumInserts();
         }
       }
