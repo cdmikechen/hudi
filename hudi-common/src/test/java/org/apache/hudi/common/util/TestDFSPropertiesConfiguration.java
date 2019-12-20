@@ -18,21 +18,23 @@
 
 package org.apache.hudi.common.util;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
+import org.apache.hudi.common.minicluster.HdfsTestService;
 
-import java.io.IOException;
-import java.io.PrintStream;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hdfs.DistributedFileSystem;
 import org.apache.hadoop.hdfs.MiniDFSCluster;
-import org.apache.hudi.common.minicluster.HdfsTestService;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import java.io.IOException;
+import java.io.PrintStream;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.fail;
+
 /**
- * Tests basic functionality of {@link DFSPropertiesConfiguration}
+ * Tests basic functionality of {@link DFSPropertiesConfiguration}.
  */
 public class TestDFSPropertiesConfiguration {
 
@@ -40,7 +42,6 @@ public class TestDFSPropertiesConfiguration {
   private static HdfsTestService hdfsTestService;
   private static MiniDFSCluster dfsCluster;
   private static DistributedFileSystem dfs;
-
 
   @BeforeClass
   public static void initClass() throws Exception {
@@ -53,25 +54,18 @@ public class TestDFSPropertiesConfiguration {
 
     // create some files.
     Path filePath = new Path(dfsBasePath + "/t1.props");
-    writePropertiesFile(filePath, new String[]{
-        "", "#comment", "abc",// to be ignored
-        "int.prop=123", "double.prop=113.4", "string.prop=str", "boolean.prop=true", "long.prop=1354354354"
-    });
+    writePropertiesFile(filePath, new String[] {"", "#comment", "abc", // to be ignored
+        "int.prop=123", "double.prop=113.4", "string.prop=str", "boolean.prop=true", "long.prop=1354354354"});
 
     filePath = new Path(dfsBasePath + "/t2.props");
-    writePropertiesFile(filePath, new String[]{
-        "string.prop=ignored", "include=t1.props"
-    });
+    writePropertiesFile(filePath, new String[] {"string.prop=ignored", "include=t1.props"});
 
     filePath = new Path(dfsBasePath + "/t3.props");
-    writePropertiesFile(filePath, new String[]{
-        "double.prop=838.3", "include = t2.props", "double.prop=243.4", "string.prop=t3.value"
-    });
+    writePropertiesFile(filePath,
+        new String[] {"double.prop=838.3", "include = t2.props", "double.prop=243.4", "string.prop=t3.value"});
 
     filePath = new Path(dfsBasePath + "/t4.props");
-    writePropertiesFile(filePath, new String[]{
-        "double.prop=838.3", "include = t4.props"
-    });
+    writePropertiesFile(filePath, new String[] {"double.prop=838.3", "include = t4.props"});
   }
 
   @AfterClass
@@ -98,7 +92,9 @@ public class TestDFSPropertiesConfiguration {
     try {
       props.getString("invalid.key");
       fail("Should error out here.");
-    } catch (IllegalArgumentException iae) { /* ignore */ }
+    } catch (IllegalArgumentException iae) {
+      // ignore
+    }
 
     assertEquals(123, props.getInteger("int.prop"));
     assertEquals(113.4, props.getDouble("double.prop"), 0.001);
@@ -133,6 +129,8 @@ public class TestDFSPropertiesConfiguration {
     try {
       new DFSPropertiesConfiguration(dfs, new Path(dfsBasePath + "/t4.props"));
       fail("Should error out on a self-included file.");
-    } catch (IllegalStateException ise) { /* ignore */ }
+    } catch (IllegalStateException ise) {
+      // ignore
+    }
   }
 }

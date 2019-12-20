@@ -18,14 +18,6 @@
 
 package org.apache.hudi;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-
-import java.io.File;
-import java.util.List;
-import java.util.stream.Collectors;
 import org.apache.hudi.common.HoodieTestDataGenerator;
 import org.apache.hudi.common.model.HoodieCleaningPolicy;
 import org.apache.hudi.common.model.HoodieDataFile;
@@ -41,22 +33,31 @@ import org.apache.hudi.config.HoodieWriteConfig;
 import org.apache.hudi.exception.HoodieRollbackException;
 import org.apache.hudi.index.HoodieIndex;
 import org.apache.hudi.table.HoodieTable;
+
 import org.apache.spark.api.java.JavaRDD;
 import org.junit.Test;
 
+import java.io.File;
+import java.util.List;
+import java.util.stream.Collectors;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
 /**
- * Test Cases for rollback of snapshots and commits
+ * Test Cases for rollback of snapshots and commits.
  */
 public class TestClientRollback extends TestHoodieClientBase {
 
   /**
-   * Test case for rollback-savepoint interaction
+   * Test case for rollback-savepoint interaction.
    */
   @Test
   public void testSavepointAndRollback() throws Exception {
-    HoodieWriteConfig cfg = getConfigBuilder().withCompactionConfig(
-        HoodieCompactionConfig.newBuilder().withCleanerPolicy(HoodieCleaningPolicy.KEEP_LATEST_COMMITS).retainCommits(1)
-            .build()).build();
+    HoodieWriteConfig cfg = getConfigBuilder().withCompactionConfig(HoodieCompactionConfig.newBuilder()
+        .withCleanerPolicy(HoodieCleaningPolicy.KEEP_LATEST_COMMITS).retainCommits(1).build()).build();
     try (HoodieWriteClient client = getHoodieWriteClient(cfg);) {
       HoodieTestDataGenerator.writePartitionMetadata(fs, HoodieTestDataGenerator.DEFAULT_PARTITION_PATHS, basePath);
 
@@ -95,9 +96,9 @@ public class TestClientRollback extends TestHoodieClientBase {
       statuses = client.upsert(jsc.parallelize(records, 1), newCommitTime).collect();
       // Verify there are no errors
       assertNoWriteErrors(statuses);
-      List<String> partitionPaths = FSUtils.getAllPartitionPaths(fs, cfg.getBasePath(),
-          getConfig().shouldAssumeDatePartitioning());
-      HoodieTableMetaClient metaClient = new HoodieTableMetaClient(jsc.hadoopConfiguration(), basePath);
+      List<String> partitionPaths =
+          FSUtils.getAllPartitionPaths(fs, cfg.getBasePath(), getConfig().shouldAssumeDatePartitioning());
+      metaClient = HoodieTableMetaClient.reload(metaClient);
       HoodieTable table = HoodieTable.getHoodieTable(metaClient, getConfig(), jsc);
       final ReadOptimizedView view1 = table.getROFileSystemView();
 
@@ -122,7 +123,7 @@ public class TestClientRollback extends TestHoodieClientBase {
       // Verify there are no errors
       assertNoWriteErrors(statuses);
 
-      metaClient = new HoodieTableMetaClient(jsc.hadoopConfiguration(), basePath);
+      metaClient = HoodieTableMetaClient.reload(metaClient);
       table = HoodieTable.getHoodieTable(metaClient, getConfig(), jsc);
       final ReadOptimizedView view2 = table.getROFileSystemView();
 
@@ -143,7 +144,7 @@ public class TestClientRollback extends TestHoodieClientBase {
       HoodieInstant savepoint = table.getCompletedSavepointTimeline().getInstants().findFirst().get();
       client.rollbackToSavepoint(savepoint.getTimestamp());
 
-      metaClient = new HoodieTableMetaClient(jsc.hadoopConfiguration(), basePath);
+      metaClient = HoodieTableMetaClient.reload(metaClient);
       table = HoodieTable.getHoodieTable(metaClient, getConfig(), jsc);
       final ReadOptimizedView view3 = table.getROFileSystemView();
       dataFiles = partitionPaths.stream().flatMap(s -> {
@@ -164,7 +165,7 @@ public class TestClientRollback extends TestHoodieClientBase {
   }
 
   /**
-   * Test Cases for effects of rollbacking completed/inflight commits
+   * Test Cases for effects of rollbacking completed/inflight commits.
    */
   @Test
   public void testRollbackCommit() throws Exception {
@@ -173,8 +174,8 @@ public class TestClientRollback extends TestHoodieClientBase {
     String commitTime2 = "20160502020601";
     String commitTime3 = "20160506030611";
     new File(basePath + "/.hoodie").mkdirs();
-    HoodieTestDataGenerator
-        .writePartitionMetadata(fs, new String[]{"2016/05/01", "2016/05/02", "2016/05/06"}, basePath);
+    HoodieTestDataGenerator.writePartitionMetadata(fs, new String[] {"2016/05/01", "2016/05/02", "2016/05/06"},
+        basePath);
 
     // Only first two have commit files
     HoodieTestUtils.createCommitFiles(basePath, commitTime1, commitTime2);
@@ -196,8 +197,8 @@ public class TestClientRollback extends TestHoodieClientBase {
     String file32 = HoodieTestUtils.createDataFile(basePath, "2016/05/02", commitTime3, "id32");
     String file33 = HoodieTestUtils.createDataFile(basePath, "2016/05/06", commitTime3, "id33");
 
-    HoodieWriteConfig config = HoodieWriteConfig.newBuilder().withPath(basePath).withIndexConfig(
-        HoodieIndexConfig.newBuilder().withIndexType(HoodieIndex.IndexType.INMEMORY).build()).build();
+    HoodieWriteConfig config = HoodieWriteConfig.newBuilder().withPath(basePath)
+        .withIndexConfig(HoodieIndexConfig.newBuilder().withIndexType(HoodieIndex.IndexType.INMEMORY).build()).build();
 
     try (HoodieWriteClient client = getHoodieWriteClient(config, false);) {
 
@@ -254,7 +255,7 @@ public class TestClientRollback extends TestHoodieClientBase {
   }
 
   /**
-   * Test auto-rollback of commits which are in flight
+   * Test auto-rollback of commits which are in flight.
    */
   @Test
   public void testAutoRollbackInflightCommit() throws Exception {
@@ -262,9 +263,11 @@ public class TestClientRollback extends TestHoodieClientBase {
     String commitTime1 = "20160501010101";
     String commitTime2 = "20160502020601";
     String commitTime3 = "20160506030611";
+    String commitTime4 = "20160506030621";
+    String commitTime5 = "20160506030631";
     new File(basePath + "/.hoodie").mkdirs();
-    HoodieTestDataGenerator
-        .writePartitionMetadata(fs, new String[]{"2016/05/01", "2016/05/02", "2016/05/06"}, basePath);
+    HoodieTestDataGenerator.writePartitionMetadata(fs, new String[] {"2016/05/01", "2016/05/02", "2016/05/06"},
+        basePath);
 
     // One good commit
     HoodieTestUtils.createCommitFiles(basePath, commitTime1);
@@ -287,11 +290,11 @@ public class TestClientRollback extends TestHoodieClientBase {
     String file33 = HoodieTestUtils.createDataFile(basePath, "2016/05/06", commitTime3, "id33");
 
     // Turn auto rollback off
-    HoodieWriteConfig config = HoodieWriteConfig.newBuilder().withPath(basePath).withIndexConfig(
-        HoodieIndexConfig.newBuilder().withIndexType(HoodieIndex.IndexType.INMEMORY).build()).build();
+    HoodieWriteConfig config = HoodieWriteConfig.newBuilder().withPath(basePath)
+        .withIndexConfig(HoodieIndexConfig.newBuilder().withIndexType(HoodieIndex.IndexType.INMEMORY).build()).build();
 
     try (HoodieWriteClient client = getHoodieWriteClient(config, false);) {
-
+      client.startCommitWithTime(commitTime4);
       // Check results, nothing changed
       assertTrue(HoodieTestUtils.doesCommitExist(basePath, commitTime1));
       assertTrue(HoodieTestUtils.doesInflightExist(basePath, commitTime2));
@@ -309,7 +312,7 @@ public class TestClientRollback extends TestHoodieClientBase {
 
     // Turn auto rollback on
     try (HoodieWriteClient client = getHoodieWriteClient(config, true)) {
-      client.startCommit();
+      client.startCommitWithTime(commitTime5);
       assertTrue(HoodieTestUtils.doesCommitExist(basePath, commitTime1));
       assertFalse(HoodieTestUtils.doesInflightExist(basePath, commitTime2));
       assertFalse(HoodieTestUtils.doesInflightExist(basePath, commitTime3));

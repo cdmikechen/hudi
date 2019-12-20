@@ -22,6 +22,12 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.google.common.base.Preconditions;
 import io.javalin.Javalin;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.spark.api.java.JavaSparkContext;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -31,11 +37,6 @@ import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.IntStream;
-import org.apache.http.HttpResponse;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClientBuilder;
-import org.apache.spark.api.java.JavaSparkContext;
 
 public class HoodieWithTimelineServer implements Serializable {
 
@@ -51,8 +52,7 @@ public class HoodieWithTimelineServer implements Serializable {
 
     @Parameter(names = {"--spark-master", "-ms"}, description = "Spark master", required = false)
     public String sparkMaster = null;
-    @Parameter(names = {"--spark-memory",
-        "-sm"}, description = "spark memory to use", required = true)
+    @Parameter(names = {"--spark-memory", "-sm"}, description = "spark memory to use", required = true)
     public String sparkMemory = null;
     @Parameter(names = {"--num-partitions", "-n"}, description = "Num Partitions", required = false)
     public Integer numPartitions = 100;
@@ -87,8 +87,7 @@ public class HoodieWithTimelineServer implements Serializable {
     System.out.println("Driver Hostname is :" + driverHost);
     List<String> messages = new ArrayList<>();
     IntStream.range(0, cfg.numPartitions).forEach(i -> messages.add("Hello World"));
-    List<String> gotMessages =
-        jsc.parallelize(messages).map(msg -> sendRequest(driverHost, cfg.serverPort)).collect();
+    List<String> gotMessages = jsc.parallelize(messages).map(msg -> sendRequest(driverHost, cfg.serverPort)).collect();
     System.out.println("Got Messages :" + gotMessages);
     Preconditions.checkArgument(gotMessages.equals(messages), "Got expected reply from Server");
   }

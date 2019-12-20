@@ -28,8 +28,7 @@
 
   <properties>
     <checkstyle.skip>true</checkstyle.skip>
-    <notice.dir>${project.basedir}/src/main/resources/META-INF</notice.dir>
-    <notice.file>HUDI_NOTICE.txt</notice.file>
+    <main.basedir>${project.parent.basedir}</main.basedir>
   </properties>
 
   <build>
@@ -52,6 +51,17 @@
               <createSourcesJar>true</createSourcesJar>
               <dependencyReducedPomLocation>${project.build.directory}/dependency-reduced-pom.xml
               </dependencyReducedPomLocation>
+              <transformers>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ApacheLicenseResourceTransformer">
+                </transformer>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ApacheNoticeResourceTransformer">
+                    <addHeader>true</addHeader>
+                </transformer>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.IncludeResourceTransformer">
+                  <resource>META-INF/LICENSE</resource>
+                  <file>target/classes/META-INF/LICENSE</file>
+                </transformer>
+              </transformers>
               <artifactSet>
                 <includes>
                   <include>org.apache.hudi:hudi-common</include>
@@ -95,31 +105,31 @@
                 </relocation>
                 <relocation>
                   <pattern>org.apache.hive.jdbc.</pattern>
-                  <shadedPattern>org.apache.hudi.org.apache.hive.jdbc.</shadedPattern>
+                  <shadedPattern>${spark.bundle.hive.shade.prefix}org.apache.hive.jdbc.</shadedPattern>
                 </relocation>
                 <relocation>
                   <pattern>org.apache.hadoop.hive.metastore.</pattern>
-                  <shadedPattern>org.apache.hudi.org.apache.hadoop_hive.metastore.</shadedPattern>
+                  <shadedPattern>${spark.bundle.hive.shade.prefix}org.apache.hadoop.hive.metastore.</shadedPattern>
                 </relocation>
                 <relocation>
                   <pattern>org.apache.hive.common.</pattern>
-                  <shadedPattern>org.apache.hudi.org.apache.hive.common.</shadedPattern>
+                  <shadedPattern>${spark.bundle.hive.shade.prefix}org.apache.hive.common.</shadedPattern>
                 </relocation>
                 <relocation>
                   <pattern>org.apache.hadoop.hive.common.</pattern>
-                  <shadedPattern>org.apache.hudi.org.apache.hadoop_hive.common.</shadedPattern>
+                  <shadedPattern>${spark.bundle.hive.shade.prefix}org.apache.hadoop.hive.common.</shadedPattern>
                 </relocation>
                 <relocation>
                   <pattern>org.apache.hadoop.hive.conf.</pattern>
-                  <shadedPattern>org.apache.hudi.org.apache.hadoop_hive.conf.</shadedPattern>
+                  <shadedPattern>${spark.bundle.hive.shade.prefix}org.apache.hadoop.hive.conf.</shadedPattern>
                 </relocation>
                 <relocation>
                   <pattern>org.apache.hive.service.</pattern>
-                  <shadedPattern>org.apache.hudi.org.apache.hive.service.</shadedPattern>
+                  <shadedPattern>${spark.bundle.hive.shade.prefix}org.apache.hive.service.</shadedPattern>
                 </relocation>
                 <relocation>
                   <pattern>org.apache.hadoop.hive.service.</pattern>
-                  <shadedPattern>org.apache.hudi.org.apache.hadoop_hive.service.</shadedPattern>
+                  <shadedPattern>${spark.bundle.hive.shade.prefix}org.apache.hadoop.hive.service.</shadedPattern>
                 </relocation>
                 <relocation>
                   <pattern>com.codahale.metrics.</pattern>
@@ -134,40 +144,6 @@
                   <shadedPattern>org.apache.hudi.com.databricks.</shadedPattern>
                 </relocation>
                 <!-- TODO: Revisit GH ISSUE #533 & PR#633-->
-                <!--
-                <relocation>
-                  <pattern>org.apache.hive.jdbc.</pattern>
-                  <shadedPattern>org.apache.hudi.org.apache.hive.jdbc.</shadedPattern>
-                </relocation>
-                <relocation>
-                  <pattern>org.apache.hadoop.hive.metastore.</pattern>
-                  <shadedPattern>org.apache.hudi.org.apache.hadoop_hive.metastore.</shadedPattern>
-                </relocation>
-                <relocation>
-                  <pattern>org.apache.hive.common.</pattern>
-                  <shadedPattern>org.apache.hudi.org.apache.hive.common.</shadedPattern>
-                </relocation>
-                <relocation>
-                  <pattern>org.apache.hadoop.hive.common.</pattern>
-                  <shadedPattern>org.apache.hudi.org.apache.hadoop_hive.common.</shadedPattern>
-                </relocation>
-                <relocation>
-                  <pattern>org.apache.hadoop.hive.conf.</pattern>
-                  <shadedPattern>org.apache.hudi.org.apache.hadoop_hive.conf.</shadedPattern>
-                </relocation>
-                <relocation>
-                  <pattern>org.apache.hive.service.</pattern>
-                  <shadedPattern>org.apache.hudi.org.apache.hive.service.</shadedPattern>
-                </relocation>
-                <relocation>
-                  <pattern>org.apache.hadoop.hive.service.</pattern>
-                  <shadedPattern>org.apache.hudi.org.apache.hadoop_hive.service.</shadedPattern>
-                </relocation>
-                <relocation>
-                  <pattern>org.apache.hadoop.hive.serde2.</pattern>
-                  <shadedPattern>org.apache.hudi.org.apache.hadoop_hive.serde2.</shadedPattern>
-                </relocation>
-                -->
               </relocations>
              <filters>
                 <filter>
@@ -176,9 +152,6 @@
                     <exclude>META-INF/*.SF</exclude>
                     <exclude>META-INF/*.DSA</exclude>
                     <exclude>META-INF/*.RSA</exclude>
-                    <!-- Use this jar's NOTICE and license file -->
-                    <exclude>META-INF/NOTICE*</exclude>
-                    <exclude>META-INF/LICENSE*</exclude>
                     <exclude>META-INF/services/javax.*</exclude>
                   </excludes>
                 </filter>
@@ -239,37 +212,48 @@
       <groupId>${hive.groupid}</groupId>
       <artifactId>hive-service</artifactId>
       <version>${hive.version}</version>
-      <scope>compile</scope>
+      <scope>${spark.bundle.hive.scope}</scope>
     </dependency>
 
     <dependency>
       <groupId>${hive.groupid}</groupId>
       <artifactId>hive-service-rpc</artifactId>
       <version>${hive.version}</version>
-      <scope>compile</scope>
+      <scope>${spark.bundle.hive.scope}</scope>
     </dependency>
 
     <dependency>
       <groupId>${hive.groupid}</groupId>
       <artifactId>hive-jdbc</artifactId>
       <version>${hive.version}</version>
-      <scope>compile</scope>
+      <scope>${spark.bundle.hive.scope}</scope>
     </dependency>
 
     <dependency>
       <groupId>${hive.groupid}</groupId>
       <artifactId>hive-metastore</artifactId>
       <version>${hive.version}</version>
-      <scope>compile</scope>
+      <scope>${spark.bundle.hive.scope}</scope>
     </dependency>
 
     <dependency>
       <groupId>${hive.groupid}</groupId>
       <artifactId>hive-common</artifactId>
       <version>${hive.version}</version>
-      <scope>compile</scope>
+      <scope>${spark.bundle.hive.scope}</scope>
     </dependency>
+
     <!-- TODO: Reinvestigate PR 633 -->
   </dependencies>
+
+  <profiles>
+    <profile>
+      <id>spark-bundle-shade-hive</id>
+      <properties>
+        <spark.bundle.hive.scope>compile</spark.bundle.hive.scope>
+        <spark.bundle.hive.shade.prefix>org.apache.hudi.</spark.bundle.hive.shade.prefix>
+      </properties>
+    </profile>
+  </profiles>
 </project>
 

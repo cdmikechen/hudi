@@ -19,6 +19,7 @@
 package org.apache.hudi.hive.util;
 
 import com.google.common.collect.Maps;
+
 import java.util.Iterator;
 import java.util.Map;
 
@@ -28,8 +29,8 @@ public class ColumnNameXLator {
 
   public static String translateNestedColumn(String colName) {
     Map.Entry entry;
-    for (Iterator ic = xformMap.entrySet().iterator(); ic.hasNext();
-        colName = colName.replaceAll((String) entry.getKey(), (String) entry.getValue())) {
+    for (Iterator ic = xformMap.entrySet().iterator(); ic.hasNext(); colName =
+        colName.replaceAll((String) entry.getKey(), (String) entry.getValue())) {
       entry = (Map.Entry) ic.next();
     }
 

@@ -18,8 +18,9 @@
 
 package org.apache.hudi.utilities.schema;
 
-import org.apache.avro.Schema;
 import org.apache.hudi.AvroConversionUtils;
+
+import org.apache.avro.Schema;
 import org.apache.spark.sql.types.StructType;
 
 public class RowBasedSchemaProvider extends SchemaProvider {
@@ -38,6 +39,6 @@ public class RowBasedSchemaProvider extends SchemaProvider {
   @Override
   public Schema getSourceSchema() {
     return AvroConversionUtils.convertStructTypeToAvroSchema(rowStruct, HOODIE_RECORD_STRUCT_NAME,
-            HOODIE_RECORD_NAMESPACE);
+        HOODIE_RECORD_NAMESPACE);
   }
 }

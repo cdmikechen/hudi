@@ -18,10 +18,14 @@
 
 package org.apache.hudi.common.model;
 
-import java.util.List;
 import org.junit.Assert;
 import org.junit.Test;
 
+import java.util.List;
+
+/**
+ * Tests hoodie commit metadata {@link HoodieCommitMetadata}.
+ */
 public class TestHoodieCommitMetadata {
 
   @Test
@@ -36,8 +40,8 @@ public class TestHoodieCommitMetadata {
     Assert.assertTrue(commitMetadata.getTotalLogFilesCompacted() > 0);
 
     String serializedCommitMetadata = commitMetadata.toJsonString();
-    HoodieCommitMetadata metadata = HoodieCommitMetadata.fromJsonString(serializedCommitMetadata,
-        HoodieCommitMetadata.class);
+    HoodieCommitMetadata metadata =
+        HoodieCommitMetadata.fromJsonString(serializedCommitMetadata, HoodieCommitMetadata.class);
     // Make sure timing metrics are not written to instant file
     Assert.assertTrue(metadata.getTotalScanTime() == 0);
     Assert.assertTrue(metadata.getTotalLogFilesCompacted() > 0);

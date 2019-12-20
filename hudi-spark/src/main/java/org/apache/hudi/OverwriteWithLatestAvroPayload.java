@@ -18,13 +18,15 @@
 
 package org.apache.hudi;
 
-import java.io.IOException;
-import org.apache.avro.Schema;
-import org.apache.avro.generic.GenericRecord;
-import org.apache.avro.generic.IndexedRecord;
 import org.apache.hudi.common.model.HoodieRecordPayload;
 import org.apache.hudi.common.util.HoodieAvroUtils;
 import org.apache.hudi.common.util.Option;
+
+import org.apache.avro.Schema;
+import org.apache.avro.generic.GenericRecord;
+import org.apache.avro.generic.IndexedRecord;
+
+import java.io.IOException;
 
 /**
  * Default payload used for delta streamer.
@@ -32,8 +34,8 @@ import org.apache.hudi.common.util.Option;
  * 1. preCombine - Picks the latest delta record for a key, based on an ordering field 2.
  * combineAndGetUpdateValue/getInsertValue - Simply overwrites storage with latest delta record
  */
-public class OverwriteWithLatestAvroPayload extends BaseAvroPayload implements
-    HoodieRecordPayload<OverwriteWithLatestAvroPayload> {
+public class OverwriteWithLatestAvroPayload extends BaseAvroPayload
+    implements HoodieRecordPayload<OverwriteWithLatestAvroPayload> {
 
   /**
    * @param record
@@ -58,8 +60,7 @@ public class OverwriteWithLatestAvroPayload extends BaseAvroPayload implements
   }
 
   @Override
-  public Option<IndexedRecord> combineAndGetUpdateValue(IndexedRecord currentValue, Schema schema)
-      throws IOException {
+  public Option<IndexedRecord> combineAndGetUpdateValue(IndexedRecord currentValue, Schema schema) throws IOException {
     // combining strategy here trivially ignores currentValue on disk and writes this record
     return getInsertValue(schema);
   }

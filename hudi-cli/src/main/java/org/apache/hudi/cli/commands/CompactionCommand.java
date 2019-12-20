@@ -18,20 +18,6 @@
 
 package org.apache.hudi.cli.commands;
 
-import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
-import java.util.function.Function;
-import java.util.stream.Collectors;
-import org.apache.hadoop.fs.FSDataInputStream;
-import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.Path;
 import org.apache.hudi.CompactionAdminClient.RenameOpResult;
 import org.apache.hudi.CompactionAdminClient.ValidationOpResult;
 import org.apache.hudi.avro.model.HoodieCompactionOperation;
@@ -50,6 +36,10 @@ import org.apache.hudi.common.table.timeline.HoodieInstant.State;
 import org.apache.hudi.common.util.AvroUtils;
 import org.apache.hudi.common.util.Option;
 import org.apache.hudi.exception.HoodieIOException;
+
+import org.apache.hadoop.fs.FSDataInputStream;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
 import org.apache.log4j.LogManager;
 import org.apache.log4j.Logger;
 import org.apache.spark.launcher.SparkLauncher;
@@ -60,10 +50,24 @@ import org.springframework.shell.core.annotation.CliCommand;
 import org.springframework.shell.core.annotation.CliOption;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+/**
+ * CLI command to display compaction related options.
+ */
 @Component
 public class CompactionCommand implements CommandMarker {
 
-  private static Logger log = LogManager.getLogger(CompactionCommand.class);
+  private static final Logger LOG = LogManager.getLogger(CompactionCommand.class);
 
   private static final String TMP_DIR = "/tmp/";
 
@@ -75,63 +79,57 @@ public class CompactionCommand implements CommandMarker {
 
   @CliCommand(value = "compactions show all", help = "Shows all compactions that are in active timeline")
   public String compactionsAll(
-      @CliOption(key = {
-          "includeExtraMetadata"}, help = "Include extra metadata", unspecifiedDefaultValue = "false") final
-      boolean includeExtraMetadata,
-      @CliOption(key = {
-          "limit"}, mandatory = false, help = "Limit commits", unspecifiedDefaultValue = "-1") final Integer limit,
+      @CliOption(key = {"includeExtraMetadata"}, help = "Include extra metadata",
+          unspecifiedDefaultValue = "false") final boolean includeExtraMetadata,
+      @CliOption(key = {"limit"}, mandatory = false, help = "Limit commits",
+          unspecifiedDefaultValue = "-1") final Integer limit,
       @CliOption(key = {"sortBy"}, help = "Sorting Field", unspecifiedDefaultValue = "") final String sortByField,
       @CliOption(key = {"desc"}, help = "Ordering", unspecifiedDefaultValue = "false") final boolean descending,
-      @CliOption(key = {
-          "headeronly"}, help = "Print Header Only", unspecifiedDefaultValue = "false") final
-      boolean headerOnly) throws IOException {
+      @CliOption(key = {"headeronly"}, help = "Print Header Only",
+          unspecifiedDefaultValue = "false") final boolean headerOnly)
+      throws IOException {
     HoodieActiveTimeline activeTimeline = HoodieCLI.tableMetadata.getActiveTimeline();
     HoodieTimeline timeline = activeTimeline.getCommitsAndCompactionTimeline();
     HoodieTimeline commitTimeline = activeTimeline.getCommitTimeline().filterCompletedInstants();
     Set<String> committed = commitTimeline.getInstants().map(HoodieInstant::getTimestamp).collect(Collectors.toSet());
 
-    List<HoodieInstant> instants = timeline.getInstants().collect(Collectors.toList());
+    List<HoodieInstant> instants = timeline.getReverseOrderedInstants().collect(Collectors.toList());
     List<Comparable[]> rows = new ArrayList<>();
-    Collections.reverse(instants);
     for (int i = 0; i < instants.size(); i++) {
       HoodieInstant instant = instants.get(i);
-      HoodieCompactionPlan workload = null;
+      HoodieCompactionPlan compactionPlan = null;
       if (!instant.getAction().equals(HoodieTimeline.COMPACTION_ACTION)) {
         try {
           // This could be a completed compaction. Assume a compaction request file is present but skip if fails
-          workload = AvroUtils.deserializeCompactionPlan(
-              activeTimeline.getInstantAuxiliaryDetails(
+          compactionPlan = AvroUtils.deserializeCompactionPlan(
+              activeTimeline.readPlanAsBytes(
                   HoodieTimeline.getCompactionRequestedInstant(instant.getTimestamp())).get());
         } catch (HoodieIOException ioe) {
           // SKIP
         }
       } else {
-        workload = AvroUtils.deserializeCompactionPlan(activeTimeline.getInstantAuxiliaryDetails(
+        compactionPlan = AvroUtils.deserializeCompactionPlan(activeTimeline.readPlanAsBytes(
             HoodieTimeline.getCompactionRequestedInstant(instant.getTimestamp())).get());
       }
 
-      if (null != workload) {
+      if (null != compactionPlan) {
         HoodieInstant.State state = instant.getState();
         if (committed.contains(instant.getTimestamp())) {
           state = State.COMPLETED;
         }
         if (includeExtraMetadata) {
-          rows.add(new Comparable[]{instant.getTimestamp(),
-              state.toString(),
-              workload.getOperations() == null ? 0 : workload.getOperations().size(),
-              workload.getExtraMetadata().toString()});
+          rows.add(new Comparable[] {instant.getTimestamp(), state.toString(),
+              compactionPlan.getOperations() == null ? 0 : compactionPlan.getOperations().size(),
+              compactionPlan.getExtraMetadata().toString()});
         } else {
-          rows.add(new Comparable[]{instant.getTimestamp(),
-              state.toString(),
-              workload.getOperations() == null ? 0 : workload.getOperations().size()});
+          rows.add(new Comparable[] {instant.getTimestamp(), state.toString(),
+              compactionPlan.getOperations() == null ? 0 : compactionPlan.getOperations().size()});
         }
       }
     }
 
     Map<String, Function<Object, String>> fieldNameToConverterMap = new HashMap<>();
-    TableHeader header = new TableHeader()
-        .addTableHeaderField("Compaction Instant Time")
-        .addTableHeaderField("State")
+    TableHeader header = new TableHeader().addTableHeaderField("Compaction Instant Time").addTableHeaderField("State")
         .addTableHeaderField("Total FileIds to be Compacted");
     if (includeExtraMetadata) {
       header = header.addTableHeaderField("Extra Metadata");
@@ -141,57 +139,47 @@ public class CompactionCommand implements CommandMarker {
 
   @CliCommand(value = "compaction show", help = "Shows compaction details for a specific compaction instant")
   public String compactionShow(
-      @CliOption(key = "instant", mandatory = true, help = "Base path for the target hoodie dataset") final
-      String compactionInstantTime,
-      @CliOption(key = {
-          "limit"}, mandatory = false, help = "Limit commits", unspecifiedDefaultValue = "-1") final Integer limit,
+      @CliOption(key = "instant", mandatory = true,
+          help = "Base path for the target hoodie dataset") final String compactionInstantTime,
+      @CliOption(key = {"limit"}, mandatory = false, help = "Limit commits",
+          unspecifiedDefaultValue = "-1") final Integer limit,
       @CliOption(key = {"sortBy"}, help = "Sorting Field", unspecifiedDefaultValue = "") final String sortByField,
       @CliOption(key = {"desc"}, help = "Ordering", unspecifiedDefaultValue = "false") final boolean descending,
-      @CliOption(key = {
-          "headeronly"}, help = "Print Header Only", unspecifiedDefaultValue = "false") final boolean headerOnly)
+      @CliOption(key = {"headeronly"}, help = "Print Header Only",
+          unspecifiedDefaultValue = "false") final boolean headerOnly)
       throws Exception {
     HoodieActiveTimeline activeTimeline = HoodieCLI.tableMetadata.getActiveTimeline();
-    HoodieCompactionPlan workload = AvroUtils.deserializeCompactionPlan(
-        activeTimeline.getInstantAuxiliaryDetails(
+    HoodieCompactionPlan compactionPlan = AvroUtils.deserializeCompactionPlan(
+        activeTimeline.readPlanAsBytes(
             HoodieTimeline.getCompactionRequestedInstant(compactionInstantTime)).get());
 
     List<Comparable[]> rows = new ArrayList<>();
-    if ((null != workload) && (null != workload.getOperations())) {
-      for (HoodieCompactionOperation op : workload.getOperations()) {
-        rows.add(new Comparable[]{op.getPartitionPath(),
-            op.getFileId(),
-            op.getBaseInstantTime(),
-            op.getDataFilePath(),
-            op.getDeltaFilePaths().size(),
-            op.getMetrics() == null ? "" : op.getMetrics().toString()
-        });
+    if ((null != compactionPlan) && (null != compactionPlan.getOperations())) {
+      for (HoodieCompactionOperation op : compactionPlan.getOperations()) {
+        rows.add(new Comparable[] {op.getPartitionPath(), op.getFileId(), op.getBaseInstantTime(), op.getDataFilePath(),
+            op.getDeltaFilePaths().size(), op.getMetrics() == null ? "" : op.getMetrics().toString()});
       }
     }
 
     Map<String, Function<Object, String>> fieldNameToConverterMap = new HashMap<>();
-    TableHeader header = new TableHeader()
-        .addTableHeaderField("Partition Path")
-        .addTableHeaderField("File Id")
-        .addTableHeaderField("Base Instant")
-        .addTableHeaderField("Data File Path")
-        .addTableHeaderField("Total Delta Files")
-        .addTableHeaderField("getMetrics");
+    TableHeader header = new TableHeader().addTableHeaderField("Partition Path").addTableHeaderField("File Id")
+        .addTableHeaderField("Base Instant").addTableHeaderField("Data File Path")
+        .addTableHeaderField("Total Delta Files").addTableHeaderField("getMetrics");
     return HoodiePrintHelper.print(header, fieldNameToConverterMap, sortByField, descending, limit, headerOnly, rows);
   }
 
   @CliCommand(value = "compaction schedule", help = "Schedule Compaction")
-  public String scheduleCompact(
-      @CliOption(key = "sparkMemory", unspecifiedDefaultValue = "1G", help = "Spark executor memory")
-      final String sparkMemory) throws Exception {
+  public String scheduleCompact(@CliOption(key = "sparkMemory", unspecifiedDefaultValue = "1G",
+      help = "Spark executor memory") final String sparkMemory) throws Exception {
     boolean initialized = HoodieCLI.initConf();
     HoodieCLI.initFS(initialized);
 
     // First get a compaction instant time and pass it to spark launcher for scheduling compaction
-    String compactionInstantTime = HoodieActiveTimeline.createNewCommitTime();
+    String compactionInstantTime = HoodieActiveTimeline.createNewInstantTime();
 
     if (HoodieCLI.tableMetadata.getTableType() == HoodieTableType.MERGE_ON_READ) {
-      String sparkPropertiesPath = Utils.getDefaultPropertiesFile(
-          scala.collection.JavaConversions.propertiesAsScalaMap(System.getProperties()));
+      String sparkPropertiesPath =
+          Utils.getDefaultPropertiesFile(scala.collection.JavaConversions.propertiesAsScalaMap(System.getProperties()));
       SparkLauncher sparkLauncher = SparkUtil.initLauncher(sparkPropertiesPath);
       sparkLauncher.addAppArgs(SparkCommand.COMPACT_SCHEDULE.toString(), HoodieCLI.tableMetadata.getBasePath(),
           HoodieCLI.tableMetadata.getTableConfig().getTableName(), compactionInstantTime, sparkMemory);
@@ -209,33 +197,34 @@ public class CompactionCommand implements CommandMarker {
 
   @CliCommand(value = "compaction run", help = "Run Compaction for given instant time")
   public String compact(
-      @CliOption(key = {"parallelism"}, mandatory = true, help = "Parallelism for hoodie compaction")
-      final String parallelism,
-      @CliOption(key = "schemaFilePath", mandatory = true, help = "Path for Avro schema file")
-      final String schemaFilePath,
-      @CliOption(key = "sparkMemory", unspecifiedDefaultValue = "4G", help = "Spark executor memory")
-      final String sparkMemory,
-      @CliOption(key = "retry", unspecifiedDefaultValue = "1", help = "Number of retries")
-      final String retry,
-      @CliOption(key = "compactionInstant", mandatory = false, help = "Base path for the target hoodie dataset")
-          String compactionInstantTime) throws Exception {
+      @CliOption(key = {"parallelism"}, mandatory = true,
+          help = "Parallelism for hoodie compaction") final String parallelism,
+      @CliOption(key = "schemaFilePath", mandatory = true,
+          help = "Path for Avro schema file") final String schemaFilePath,
+      @CliOption(key = "sparkMemory", unspecifiedDefaultValue = "4G",
+          help = "Spark executor memory") final String sparkMemory,
+      @CliOption(key = "retry", unspecifiedDefaultValue = "1", help = "Number of retries") final String retry,
+      @CliOption(key = "compactionInstant", mandatory = false,
+          help = "Base path for the target hoodie dataset") String compactionInstantTime)
+      throws Exception {
     boolean initialized = HoodieCLI.initConf();
     HoodieCLI.initFS(initialized);
 
     if (HoodieCLI.tableMetadata.getTableType() == HoodieTableType.MERGE_ON_READ) {
       if (null == compactionInstantTime) {
         // pick outstanding one with lowest timestamp
-        Option<String> firstPendingInstant = HoodieCLI.tableMetadata.reloadActiveTimeline()
-            .filterCompletedAndCompactionInstants().filter(instant -> instant.getAction()
-                .equals(HoodieTimeline.COMPACTION_ACTION)).firstInstant().map(HoodieInstant::getTimestamp);
+        Option<String> firstPendingInstant =
+            HoodieCLI.tableMetadata.reloadActiveTimeline().filterCompletedAndCompactionInstants()
+                .filter(instant -> instant.getAction().equals(HoodieTimeline.COMPACTION_ACTION)).firstInstant()
+                .map(HoodieInstant::getTimestamp);
         if (!firstPendingInstant.isPresent()) {
           return "NO PENDING COMPACTION TO RUN";
         }
         compactionInstantTime = firstPendingInstant.get();
       }
 
-      String sparkPropertiesPath = Utils.getDefaultPropertiesFile(
-          scala.collection.JavaConversions.propertiesAsScalaMap(System.getProperties()));
+      String sparkPropertiesPath =
+          Utils.getDefaultPropertiesFile(scala.collection.JavaConversions.propertiesAsScalaMap(System.getProperties()));
       SparkLauncher sparkLauncher = SparkUtil.initLauncher(sparkPropertiesPath);
       sparkLauncher.addAppArgs(SparkCommand.COMPACT_RUN.toString(), HoodieCLI.tableMetadata.getBasePath(),
           HoodieCLI.tableMetadata.getTableConfig().getTableName(), compactionInstantTime, parallelism, schemaFilePath,
@@ -262,7 +251,7 @@ public class CompactionCommand implements CommandMarker {
     ObjectInputStream in = new ObjectInputStream(fsDataInputStream);
     try {
       T result = (T) in.readObject();
-      log.info("Result : " + result);
+      LOG.info("Result : " + result);
       return result;
     } finally {
       in.close();
@@ -279,8 +268,8 @@ public class CompactionCommand implements CommandMarker {
       @CliOption(key = {"limit"}, help = "Limit commits", unspecifiedDefaultValue = "-1") Integer limit,
       @CliOption(key = {"sortBy"}, help = "Sorting Field", unspecifiedDefaultValue = "") String sortByField,
       @CliOption(key = {"desc"}, help = "Ordering", unspecifiedDefaultValue = "false") boolean descending,
-      @CliOption(key = {
-          "headeronly"}, help = "Print Header Only", unspecifiedDefaultValue = "false") boolean headerOnly)
+      @CliOption(key = {"headeronly"}, help = "Print Header Only",
+          unspecifiedDefaultValue = "false") boolean headerOnly)
       throws Exception {
     boolean initialized = HoodieCLI.initConf();
     HoodieCLI.initFS(initialized);
@@ -290,12 +279,11 @@ public class CompactionCommand implements CommandMarker {
     String output = null;
     if (HoodieCLI.tableMetadata.getTableType() == HoodieTableType.MERGE_ON_READ) {
       try {
-        String sparkPropertiesPath = Utils.getDefaultPropertiesFile(
-            scala.collection.JavaConversions.propertiesAsScalaMap(System.getProperties()));
+        String sparkPropertiesPath = Utils
+            .getDefaultPropertiesFile(scala.collection.JavaConversions.propertiesAsScalaMap(System.getProperties()));
         SparkLauncher sparkLauncher = SparkUtil.initLauncher(sparkPropertiesPath);
-        sparkLauncher.addAppArgs(SparkCommand.COMPACT_VALIDATE.toString(),
-            HoodieCLI.tableMetadata.getBasePath(), compactionInstant, outputPathStr, parallelism, master,
-            sparkMemory);
+        sparkLauncher.addAppArgs(SparkCommand.COMPACT_VALIDATE.toString(), HoodieCLI.tableMetadata.getBasePath(),
+            compactionInstant, outputPathStr, parallelism, master, sparkMemory);
         Process process = sparkLauncher.launch();
         InputStreamConsumer.captureOutput(process);
         int exitCode = process.waitFor();
@@ -307,21 +295,16 @@ public class CompactionCommand implements CommandMarker {
         String message = "\n\n\t COMPACTION PLAN " + (valid ? "VALID" : "INVALID") + "\n\n";
         List<Comparable[]> rows = new ArrayList<>();
         res.stream().forEach(r -> {
-          Comparable[] row = new Comparable[]{r.getOperation().getFileId(),
-              r.getOperation().getBaseInstantTime(),
-              r.getOperation().getDataFilePath().isPresent() ? r.getOperation().getDataFilePath().get() : "",
-              r.getOperation().getDeltaFilePaths().size(), r.isSuccess(),
+          Comparable[] row = new Comparable[] {r.getOperation().getFileId(), r.getOperation().getBaseInstantTime(),
+              r.getOperation().getDataFileName().isPresent() ? r.getOperation().getDataFileName().get() : "",
+              r.getOperation().getDeltaFileNames().size(), r.isSuccess(),
               r.getException().isPresent() ? r.getException().get().getMessage() : ""};
           rows.add(row);
         });
 
         Map<String, Function<Object, String>> fieldNameToConverterMap = new HashMap<>();
-        TableHeader header = new TableHeader()
-            .addTableHeaderField("File Id")
-            .addTableHeaderField("Base Instant Time")
-            .addTableHeaderField("Base Data File")
-            .addTableHeaderField("Num Delta Files")
-            .addTableHeaderField("Valid")
+        TableHeader header = new TableHeader().addTableHeaderField("File Id").addTableHeaderField("Base Instant Time")
+            .addTableHeaderField("Base Data File").addTableHeaderField("Num Delta Files").addTableHeaderField("Valid")
             .addTableHeaderField("Error");
 
         output = message + HoodiePrintHelper.print(header, fieldNameToConverterMap, sortByField, descending, limit,
@@ -349,8 +332,8 @@ public class CompactionCommand implements CommandMarker {
       @CliOption(key = {"limit"}, help = "Limit commits", unspecifiedDefaultValue = "-1") Integer limit,
       @CliOption(key = {"sortBy"}, help = "Sorting Field", unspecifiedDefaultValue = "") String sortByField,
       @CliOption(key = {"desc"}, help = "Ordering", unspecifiedDefaultValue = "false") boolean descending,
-      @CliOption(key = {
-          "headeronly"}, help = "Print Header Only", unspecifiedDefaultValue = "false") boolean headerOnly)
+      @CliOption(key = {"headeronly"}, help = "Print Header Only",
+          unspecifiedDefaultValue = "false") boolean headerOnly)
       throws Exception {
     boolean initialized = HoodieCLI.initConf();
     HoodieCLI.initFS(initialized);
@@ -360,12 +343,12 @@ public class CompactionCommand implements CommandMarker {
     String output = "";
     if (HoodieCLI.tableMetadata.getTableType() == HoodieTableType.MERGE_ON_READ) {
       try {
-        String sparkPropertiesPath = Utils.getDefaultPropertiesFile(
-            scala.collection.JavaConversions.propertiesAsScalaMap(System.getProperties()));
+        String sparkPropertiesPath = Utils
+            .getDefaultPropertiesFile(scala.collection.JavaConversions.propertiesAsScalaMap(System.getProperties()));
         SparkLauncher sparkLauncher = SparkUtil.initLauncher(sparkPropertiesPath);
-        sparkLauncher.addAppArgs(SparkCommand.COMPACT_UNSCHEDULE_PLAN.toString(),
-            HoodieCLI.tableMetadata.getBasePath(), compactionInstant, outputPathStr, parallelism, master,
-            sparkMemory, Boolean.valueOf(skipV).toString(), Boolean.valueOf(dryRun).toString());
+        sparkLauncher.addAppArgs(SparkCommand.COMPACT_UNSCHEDULE_PLAN.toString(), HoodieCLI.tableMetadata.getBasePath(),
+            compactionInstant, outputPathStr, parallelism, master, sparkMemory, Boolean.valueOf(skipV).toString(),
+            Boolean.valueOf(dryRun).toString());
         Process process = sparkLauncher.launch();
         InputStreamConsumer.captureOutput(process);
         int exitCode = process.waitFor();
@@ -373,8 +356,8 @@ public class CompactionCommand implements CommandMarker {
           return "Failed to unschedule compaction for " + compactionInstant;
         }
         List<RenameOpResult> res = deSerializeOperationResult(outputPathStr, HoodieCLI.fs);
-        output = getRenamesToBePrinted(res, limit, sortByField, descending, headerOnly,
-            "unschedule pending compaction");
+        output =
+            getRenamesToBePrinted(res, limit, sortByField, descending, headerOnly, "unschedule pending compaction");
       } finally {
         // Delete tmp file used to serialize result
         if (HoodieCLI.fs.exists(outputPath)) {
@@ -407,12 +390,12 @@ public class CompactionCommand implements CommandMarker {
     String output = "";
     if (HoodieCLI.tableMetadata.getTableType() == HoodieTableType.MERGE_ON_READ) {
       try {
-        String sparkPropertiesPath = Utils.getDefaultPropertiesFile(
-            scala.collection.JavaConversions.propertiesAsScalaMap(System.getProperties()));
+        String sparkPropertiesPath = Utils
+            .getDefaultPropertiesFile(scala.collection.JavaConversions.propertiesAsScalaMap(System.getProperties()));
         SparkLauncher sparkLauncher = SparkUtil.initLauncher(sparkPropertiesPath);
-        sparkLauncher.addAppArgs(SparkCommand.COMPACT_UNSCHEDULE_FILE.toString(),
-            HoodieCLI.tableMetadata.getBasePath(), fileId, outputPathStr, "1", master,
-            sparkMemory, Boolean.valueOf(skipV).toString(), Boolean.valueOf(dryRun).toString());
+        sparkLauncher.addAppArgs(SparkCommand.COMPACT_UNSCHEDULE_FILE.toString(), HoodieCLI.tableMetadata.getBasePath(),
+            fileId, outputPathStr, "1", master, sparkMemory, Boolean.valueOf(skipV).toString(),
+            Boolean.valueOf(dryRun).toString());
         Process process = sparkLauncher.launch();
         InputStreamConsumer.captureOutput(process);
         int exitCode = process.waitFor();
@@ -445,8 +428,8 @@ public class CompactionCommand implements CommandMarker {
       @CliOption(key = {"limit"}, help = "Limit commits", unspecifiedDefaultValue = "-1") Integer limit,
       @CliOption(key = {"sortBy"}, help = "Sorting Field", unspecifiedDefaultValue = "") String sortByField,
       @CliOption(key = {"desc"}, help = "Ordering", unspecifiedDefaultValue = "false") boolean descending,
-      @CliOption(key = {
-          "headeronly"}, help = "Print Header Only", unspecifiedDefaultValue = "false") boolean headerOnly)
+      @CliOption(key = {"headeronly"}, help = "Print Header Only",
+          unspecifiedDefaultValue = "false") boolean headerOnly)
       throws Exception {
     boolean initialized = HoodieCLI.initConf();
     HoodieCLI.initFS(initialized);
@@ -455,12 +438,11 @@ public class CompactionCommand implements CommandMarker {
     String output = "";
     if (HoodieCLI.tableMetadata.getTableType() == HoodieTableType.MERGE_ON_READ) {
       try {
-        String sparkPropertiesPath = Utils.getDefaultPropertiesFile(
-            scala.collection.JavaConversions.propertiesAsScalaMap(System.getProperties()));
+        String sparkPropertiesPath = Utils
+            .getDefaultPropertiesFile(scala.collection.JavaConversions.propertiesAsScalaMap(System.getProperties()));
         SparkLauncher sparkLauncher = SparkUtil.initLauncher(sparkPropertiesPath);
-        sparkLauncher.addAppArgs(SparkCommand.COMPACT_REPAIR.toString(),
-            HoodieCLI.tableMetadata.getBasePath(), compactionInstant, outputPathStr, parallelism, master,
-            sparkMemory, Boolean.valueOf(dryRun).toString());
+        sparkLauncher.addAppArgs(SparkCommand.COMPACT_REPAIR.toString(), HoodieCLI.tableMetadata.getBasePath(),
+            compactionInstant, outputPathStr, parallelism, master, sparkMemory, Boolean.valueOf(dryRun).toString());
         Process process = sparkLauncher.launch();
         InputStreamConsumer.captureOutput(process);
         int exitCode = process.waitFor();
@@ -481,41 +463,34 @@ public class CompactionCommand implements CommandMarker {
     }
   }
 
-  private String getRenamesToBePrinted(List<RenameOpResult> res, Integer limit,
-      String sortByField, boolean descending, boolean headerOnly, String operation) {
+  private String getRenamesToBePrinted(List<RenameOpResult> res, Integer limit, String sortByField, boolean descending,
+      boolean headerOnly, String operation) {
 
-    Option<Boolean> result = Option.fromJavaOptional(
-        res.stream().map(r -> r.isExecuted() && r.isSuccess()).reduce(Boolean::logicalAnd));
+    Option<Boolean> result =
+        Option.fromJavaOptional(res.stream().map(r -> r.isExecuted() && r.isSuccess()).reduce(Boolean::logicalAnd));
     if (result.isPresent()) {
       System.out.println("There were some file renames that needed to be done to " + operation);
 
       if (result.get()) {
         System.out.println("All renames successfully completed to " + operation + " done !!");
       } else {
-        System.out.println("Some renames failed. DataSet could be in inconsistent-state. "
-            + "Try running compaction repair");
+        System.out.println("Some renames failed. DataSet could be in inconsistent-state. Try running compaction repair");
       }
 
       List<Comparable[]> rows = new ArrayList<>();
       res.stream().forEach(r -> {
-        Comparable[] row = new Comparable[] {
-            r.getOperation().fileId, r.getOperation().srcPath, r.getOperation().destPath,
-            r.isExecuted(), r.isSuccess(), r.getException().isPresent() ? r.getException().get().getMessage() : ""
-        };
+        Comparable[] row =
+            new Comparable[] {r.getOperation().fileId, r.getOperation().srcPath, r.getOperation().destPath,
+                r.isExecuted(), r.isSuccess(), r.getException().isPresent() ? r.getException().get().getMessage() : ""};
         rows.add(row);
       });
 
       Map<String, Function<Object, String>> fieldNameToConverterMap = new HashMap<>();
-      TableHeader header = new TableHeader()
-          .addTableHeaderField("File Id")
-          .addTableHeaderField("Source File Path")
-          .addTableHeaderField("Destination File Path")
-          .addTableHeaderField("Rename Executed?")
-          .addTableHeaderField("Rename Succeeded?")
-          .addTableHeaderField("Error");
+      TableHeader header = new TableHeader().addTableHeaderField("File Id").addTableHeaderField("Source File Path")
+          .addTableHeaderField("Destination File Path").addTableHeaderField("Rename Executed?")
+          .addTableHeaderField("Rename Succeeded?").addTableHeaderField("Error");
 
-      return HoodiePrintHelper.print(header, fieldNameToConverterMap, sortByField, descending,
-          limit, headerOnly, rows);
+      return HoodiePrintHelper.print(header, fieldNameToConverterMap, sortByField, descending, limit, headerOnly, rows);
     } else {
       return "No File renames needed to " + operation + ". Operation successful.";
     }

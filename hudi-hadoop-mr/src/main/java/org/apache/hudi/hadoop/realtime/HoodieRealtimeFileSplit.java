@@ -18,13 +18,14 @@
 
 package org.apache.hudi.hadoop.realtime;
 
+import org.apache.hadoop.mapred.FileSplit;
+
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.hadoop.mapred.FileSplit;
 
 /**
  * Filesplit that wraps the base split and a list of log files to merge deltas from.
@@ -41,10 +42,9 @@ public class HoodieRealtimeFileSplit extends FileSplit {
     super();
   }
 
-  public HoodieRealtimeFileSplit(FileSplit baseSplit, String basePath, List<String> deltaLogFiles,
-      String maxCommitTime) throws IOException {
-    super(baseSplit.getPath(), baseSplit.getStart(), baseSplit.getLength(),
-        baseSplit.getLocations());
+  public HoodieRealtimeFileSplit(FileSplit baseSplit, String basePath, List<String> deltaLogFiles, String maxCommitTime)
+      throws IOException {
+    super(baseSplit.getPath(), baseSplit.getStart(), baseSplit.getLength(), baseSplit.getLocations());
     this.deltaFilePaths = deltaLogFiles;
     this.maxCommitTime = maxCommitTime;
     this.basePath = basePath;
@@ -74,7 +74,6 @@ public class HoodieRealtimeFileSplit extends FileSplit {
     return new String(bytes, StandardCharsets.UTF_8);
   }
 
-
   @Override
   public void write(DataOutput out) throws IOException {
     super.write(out);
@@ -100,11 +99,7 @@ public class HoodieRealtimeFileSplit extends FileSplit {
 
   @Override
   public String toString() {
-    return "HoodieRealtimeFileSplit{"
-        + "DataPath=" + getPath()
-        + ", deltaFilePaths=" + deltaFilePaths
-        + ", maxCommitTime='" + maxCommitTime + '\''
-        + ", basePath='" + basePath + '\''
-        + '}';
+    return "HoodieRealtimeFileSplit{DataPath=" + getPath() + ", deltaFilePaths=" + deltaFilePaths
+        + ", maxCommitTime='" + maxCommitTime + '\'' + ", basePath='" + basePath + '\'' + '}';
   }
 }

@@ -18,6 +18,8 @@
 
 package org.apache.hudi.cli;
 
+import org.apache.hudi.common.util.Option;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -28,11 +30,9 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-import org.apache.hudi.common.util.Option;
 
 /**
- * Table to be rendered. This class takes care of ordering
- * rows and limiting before renderer renders it.
+ * Table to be rendered. This class takes care of ordering rows and limiting before renderer renders it.
  */
 public class Table implements Iterable<List<String>> {
 
@@ -53,11 +53,8 @@ public class Table implements Iterable<List<String>> {
   // Rows ready for Rendering
   private List<List<String>> renderRows;
 
-  public Table(TableHeader rowHeader,
-      Map<String, Function<Object, String>> fieldNameToConverterMap,
-      Option<String> orderingFieldNameOptional,
-      Option<Boolean> isDescendingOptional,
-      Option<Integer> limitOptional) {
+  public Table(TableHeader rowHeader, Map<String, Function<Object, String>> fieldNameToConverterMap,
+      Option<String> orderingFieldNameOptional, Option<Boolean> isDescendingOptional, Option<Integer> limitOptional) {
     this.rowHeader = rowHeader;
     this.fieldNameToConverterMap = fieldNameToConverterMap;
     this.orderingFieldNameOptional = orderingFieldNameOptional;
@@ -67,7 +64,8 @@ public class Table implements Iterable<List<String>> {
   }
 
   /**
-   * Main API to add row to the table
+   * Main API to add row to the table.
+   * 
    * @param row Row
    */
   public Table add(List<Comparable> row) {
@@ -85,7 +83,8 @@ public class Table implements Iterable<List<String>> {
   }
 
   /**
-   * Add all rows
+   * Add all rows.
+   * 
    * @param rows Rows to be aded
    * @return
    */
@@ -95,7 +94,8 @@ public class Table implements Iterable<List<String>> {
   }
 
   /**
-   * Add all rows
+   * Add all rows.
+   * 
    * @param rows Rows to be added
    * @return
    */
@@ -105,7 +105,7 @@ public class Table implements Iterable<List<String>> {
   }
 
   /**
-   * API to let the table know writing is over and reading is going to start
+   * API to let the table know writing is over and reading is going to start.
    */
   public Table flip() {
     this.finishedAdding = true;
@@ -114,7 +114,8 @@ public class Table implements Iterable<List<String>> {
   }
 
   /**
-   * Sorting of rows by a specified field
+   * Sorting of rows by a specified field.
+   * 
    * @return
    */
   private List<List<Comparable>> orderRows() {

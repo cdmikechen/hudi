@@ -18,28 +18,30 @@
 
 package org.apache.hudi.common.minicluster;
 
+import org.apache.hudi.common.model.HoodieTestUtils;
+import org.apache.hudi.common.util.FileIOUtils;
+
 import com.google.common.base.Preconditions;
 import com.google.common.io.Files;
-import java.io.File;
-import java.io.IOException;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hdfs.DFSConfigKeys;
 import org.apache.hadoop.hdfs.MiniDFSCluster;
-import org.apache.hudi.common.model.HoodieTestUtils;
-import org.apache.hudi.common.util.FileIOUtils;
 import org.apache.log4j.LogManager;
 import org.apache.log4j.Logger;
+
+import java.io.File;
+import java.io.IOException;
 
 /**
  * An HDFS minicluster service implementation.
  */
 public class HdfsTestService {
 
-  private static final Logger logger = LogManager.getLogger(HdfsTestService.class);
+  private static final Logger LOG = LogManager.getLogger(HdfsTestService.class);
 
   /**
-   * Configuration settings
+   * Configuration settings.
    */
   private Configuration hadoopConf;
   private String workDir;
@@ -51,7 +53,7 @@ public class HdfsTestService {
   private int datanodeHttpPort = 50075;
 
   /**
-   * Embedded HDFS cluster
+   * Embedded HDFS cluster.
    */
   private MiniDFSCluster miniDfsCluster;
 
@@ -70,7 +72,7 @@ public class HdfsTestService {
     // If clean, then remove the work dir so we can start fresh.
     String localDFSLocation = getDFSLocation(workDir);
     if (format) {
-      logger.info("Cleaning HDFS cluster data at: " + localDFSLocation + " and starting fresh.");
+      LOG.info("Cleaning HDFS cluster data at: " + localDFSLocation + " and starting fresh.");
       File file = new File(localDFSLocation);
       FileIOUtils.deleteDirectory(file);
     }
@@ -81,12 +83,12 @@ public class HdfsTestService {
         datanodePort, datanodeIpcPort, datanodeHttpPort);
     miniDfsCluster = new MiniDFSCluster.Builder(hadoopConf).numDataNodes(1).format(format).checkDataNodeAddrConfig(true)
         .checkDataNodeHostConfig(true).build();
-    logger.info("HDFS Minicluster service started.");
+    LOG.info("HDFS Minicluster service started.");
     return miniDfsCluster;
   }
 
   public void stop() throws IOException {
-    logger.info("HDFS Minicluster service being shut down.");
+    LOG.info("HDFS Minicluster service being shut down.");
     miniDfsCluster.shutdown();
     miniDfsCluster = null;
     hadoopConf = null;
@@ -107,7 +109,7 @@ public class HdfsTestService {
    * exist.
    *
    * @param localDFSLocation The location on the local FS to hold the HDFS metadata and block data
-   * @param clean            Specifies if we want to start a clean cluster
+   * @param clean Specifies if we want to start a clean cluster
    * @return Returns true if we should format a DFSCluster, otherwise false
    */
   private static boolean shouldFormatDFSCluster(String localDFSLocation, boolean clean) {
@@ -122,15 +124,15 @@ public class HdfsTestService {
   /**
    * Configure the DFS Cluster before launching it.
    *
-   * @param config           The already created Hadoop configuration we'll further configure for HDFS
+   * @param config The already created Hadoop configuration we'll further configure for HDFS
    * @param localDFSLocation The location on the local filesystem where cluster data is stored
-   * @param bindIP           An IP address we want to force the datanode and namenode to bind to.
+   * @param bindIP An IP address we want to force the datanode and namenode to bind to.
    * @return The updated Configuration object.
    */
   private static Configuration configureDFSCluster(Configuration config, String localDFSLocation, String bindIP,
       int namenodeRpcPort, int namenodeHttpPort, int datanodePort, int datanodeIpcPort, int datanodeHttpPort) {
 
-    logger.info("HDFS force binding to ip: " + bindIP);
+    LOG.info("HDFS force binding to ip: " + bindIP);
     config.set(DFSConfigKeys.FS_DEFAULT_NAME_KEY, "hdfs://" + bindIP + ":" + namenodeRpcPort);
     config.set(DFSConfigKeys.DFS_DATANODE_ADDRESS_KEY, bindIP + ":" + datanodePort);
     config.set(DFSConfigKeys.DFS_DATANODE_IPC_ADDRESS_KEY, bindIP + ":" + datanodeIpcPort);

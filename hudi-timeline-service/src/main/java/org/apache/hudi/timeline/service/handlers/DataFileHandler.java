@@ -18,22 +18,23 @@
 
 package org.apache.hudi.timeline.service.handlers;
 
+import org.apache.hudi.common.table.timeline.dto.DataFileDTO;
+import org.apache.hudi.common.table.view.FileSystemViewManager;
+
+import org.apache.hadoop.conf.Configuration;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hudi.common.table.timeline.dto.DataFileDTO;
-import org.apache.hudi.common.table.view.FileSystemViewManager;
 
 /**
- * REST Handler servicing data-file requests
+ * REST Handler servicing data-file requests.
  */
 public class DataFileHandler extends Handler {
 
-  public DataFileHandler(Configuration conf,
-      FileSystemViewManager viewManager) throws IOException {
+  public DataFileHandler(Configuration conf, FileSystemViewManager viewManager) throws IOException {
     super(conf, viewManager);
   }
 
@@ -48,8 +49,8 @@ public class DataFileHandler extends Handler {
   }
 
   public List<DataFileDTO> getLatestDataFiles(String basePath) {
-    return viewManager.getFileSystemView(basePath).getLatestDataFiles()
-        .map(DataFileDTO::fromHoodieDataFile).collect(Collectors.toList());
+    return viewManager.getFileSystemView(basePath).getLatestDataFiles().map(DataFileDTO::fromHoodieDataFile)
+        .collect(Collectors.toList());
   }
 
   public List<DataFileDTO> getLatestDataFilesBeforeOrOn(String basePath, String partitionPath, String maxInstantTime) {
@@ -71,8 +72,8 @@ public class DataFileHandler extends Handler {
   }
 
   public List<DataFileDTO> getAllDataFiles(String basePath, String partitionPath) {
-    return viewManager.getFileSystemView(basePath).getAllDataFiles(partitionPath)
-        .map(DataFileDTO::fromHoodieDataFile).collect(Collectors.toList());
+    return viewManager.getFileSystemView(basePath).getAllDataFiles(partitionPath).map(DataFileDTO::fromHoodieDataFile)
+        .collect(Collectors.toList());
   }
 
 }

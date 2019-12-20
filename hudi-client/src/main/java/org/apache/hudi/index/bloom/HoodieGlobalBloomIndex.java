@@ -18,13 +18,6 @@
 
 package org.apache.hudi.index.bloom;
 
-import com.google.common.annotations.VisibleForTesting;
-import java.io.IOException;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.stream.Collectors;
 import org.apache.hudi.common.model.HoodieKey;
 import org.apache.hudi.common.model.HoodieRecord;
 import org.apache.hudi.common.model.HoodieRecordLocation;
@@ -35,9 +28,19 @@ import org.apache.hudi.common.util.Option;
 import org.apache.hudi.config.HoodieWriteConfig;
 import org.apache.hudi.exception.HoodieIOException;
 import org.apache.hudi.table.HoodieTable;
+
+import com.google.common.annotations.VisibleForTesting;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
+
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.stream.Collectors;
+
 import scala.Tuple2;
 
 /**
@@ -59,9 +62,8 @@ public class HoodieGlobalBloomIndex<T extends HoodieRecordPayload> extends Hoodi
       final HoodieTable hoodieTable) {
     HoodieTableMetaClient metaClient = hoodieTable.getMetaClient();
     try {
-      List<String> allPartitionPaths = FSUtils
-          .getAllPartitionPaths(metaClient.getFs(), metaClient.getBasePath(),
-              config.shouldAssumeDatePartitioning());
+      List<String> allPartitionPaths = FSUtils.getAllPartitionPaths(metaClient.getFs(), metaClient.getBasePath(),
+          config.shouldAssumeDatePartitioning());
       return super.loadInvolvedFiles(allPartitionPaths, jsc, hoodieTable);
     } catch (IOException e) {
       throw new HoodieIOException("Failed to load all partitions", e);
@@ -88,9 +90,9 @@ public class HoodieGlobalBloomIndex<T extends HoodieRecordPayload> extends Hoodi
       entry.getValue().forEach(indexFile -> indexToPartitionMap.put(indexFile.getFileId(), entry.getKey()));
     }
 
-    IndexFileFilter indexFileFilter = config.getBloomIndexPruneByRanges()
-        ? new IntervalTreeBasedGlobalIndexFileFilter(partitionToFileIndexInfo)
-        : new ListBasedGlobalIndexFileFilter(partitionToFileIndexInfo);
+    IndexFileFilter indexFileFilter =
+        config.getBloomIndexPruneByRanges() ? new IntervalTreeBasedGlobalIndexFileFilter(partitionToFileIndexInfo)
+            : new ListBasedGlobalIndexFileFilter(partitionToFileIndexInfo);
 
     return partitionRecordKeyPairRDD.map(partitionRecordKeyPair -> {
       String recordKey = partitionRecordKeyPair._2();
@@ -104,13 +106,13 @@ public class HoodieGlobalBloomIndex<T extends HoodieRecordPayload> extends Hoodi
 
 
   /**
-   * Tagging for global index should only consider the record key
+   * Tagging for global index should only consider the record key.
    */
   @Override
   protected JavaRDD<HoodieRecord<T>> tagLocationBacktoRecords(
       JavaPairRDD<HoodieKey, HoodieRecordLocation> keyFilenamePairRDD, JavaRDD<HoodieRecord<T>> recordRDD) {
-    JavaPairRDD<String, HoodieRecord<T>> rowKeyRecordPairRDD = recordRDD
-        .mapToPair(record -> new Tuple2<>(record.getRecordKey(), record));
+    JavaPairRDD<String, HoodieRecord<T>> rowKeyRecordPairRDD =
+        recordRDD.mapToPair(record -> new Tuple2<>(record.getRecordKey(), record));
 
     // Here as the recordRDD might have more data than rowKeyRDD (some rowKeys' fileId is null),
     // so we do left outer join.

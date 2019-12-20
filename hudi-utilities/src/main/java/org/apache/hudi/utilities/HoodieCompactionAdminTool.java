@@ -18,21 +18,23 @@
 
 package org.apache.hudi.utilities;
 
-import com.beust.jcommander.JCommander;
-import com.beust.jcommander.Parameter;
-import java.io.ObjectOutputStream;
-import java.io.Serializable;
-import java.util.List;
-import org.apache.hadoop.fs.FSDataOutputStream;
-import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.Path;
 import org.apache.hudi.CompactionAdminClient;
 import org.apache.hudi.CompactionAdminClient.RenameOpResult;
 import org.apache.hudi.CompactionAdminClient.ValidationOpResult;
 import org.apache.hudi.common.model.HoodieFileGroupId;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.util.FSUtils;
+
+import com.beust.jcommander.JCommander;
+import com.beust.jcommander.Parameter;
+import org.apache.hadoop.fs.FSDataOutputStream;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
 import org.apache.spark.api.java.JavaSparkContext;
+
+import java.io.ObjectOutputStream;
+import java.io.Serializable;
+import java.util.List;
 
 public class HoodieCompactionAdminTool {
 
@@ -54,7 +56,7 @@ public class HoodieCompactionAdminTool {
   }
 
   /**
-   * Executes one of compaction admin operations
+   * Executes one of compaction admin operations.
    */
   public void run(JavaSparkContext jsc) throws Exception {
     HoodieTableMetaClient metaClient = new HoodieTableMetaClient(jsc.hadoopConfiguration(), cfg.basePath);
@@ -74,26 +76,23 @@ public class HoodieCompactionAdminTool {
           serializeOperationResult(fs, res);
           break;
         case UNSCHEDULE_FILE:
-          List<RenameOpResult> r =
-              admin.unscheduleCompactionFileId(new HoodieFileGroupId(cfg.partitionPath, cfg.fileId),
-                  cfg.skipValidation, cfg.dryRun);
+          List<RenameOpResult> r = admin.unscheduleCompactionFileId(
+              new HoodieFileGroupId(cfg.partitionPath, cfg.fileId), cfg.skipValidation, cfg.dryRun);
           if (cfg.printOutput) {
             System.out.println(r);
           }
           serializeOperationResult(fs, r);
           break;
         case UNSCHEDULE_PLAN:
-          List<RenameOpResult> r2 =
-              admin
-                  .unscheduleCompactionPlan(cfg.compactionInstantTime, cfg.skipValidation, cfg.parallelism, cfg.dryRun);
+          List<RenameOpResult> r2 = admin.unscheduleCompactionPlan(cfg.compactionInstantTime, cfg.skipValidation,
+              cfg.parallelism, cfg.dryRun);
           if (cfg.printOutput) {
             printOperationResult("Result of Unscheduling Compaction Plan :", r2);
           }
           serializeOperationResult(fs, r2);
           break;
         case REPAIR:
-          List<RenameOpResult> r3 =
-              admin.repairCompaction(cfg.compactionInstantTime, cfg.parallelism, cfg.dryRun);
+          List<RenameOpResult> r3 = admin.repairCompaction(cfg.compactionInstantTime, cfg.parallelism, cfg.dryRun);
           if (cfg.printOutput) {
             printOperationResult("Result of Repair Operation :", r3);
           }
@@ -119,10 +118,10 @@ public class HoodieCompactionAdminTool {
   }
 
   /**
-   * Print Operation Result
+   * Print Operation Result.
    *
    * @param initialLine Initial Line
-   * @param result      Result
+   * @param result Result
    */
   private <T> void printOperationResult(String initialLine, List<T> result) {
     System.out.println(initialLine);
@@ -132,17 +131,14 @@ public class HoodieCompactionAdminTool {
   }
 
   /**
-   * Operation Types
+   * Operation Types.
    */
   public enum Operation {
-    VALIDATE,
-    UNSCHEDULE_PLAN,
-    UNSCHEDULE_FILE,
-    REPAIR
+    VALIDATE, UNSCHEDULE_PLAN, UNSCHEDULE_FILE, REPAIR
   }
 
   /**
-   * Admin Configuration Options
+   * Admin Configuration Options.
    */
   public static class Config implements Serializable {
 

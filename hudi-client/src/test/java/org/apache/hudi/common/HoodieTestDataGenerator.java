@@ -18,28 +18,6 @@
 
 package org.apache.hudi.common;
 
-import java.io.IOException;
-import java.io.Serializable;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
-import java.util.Set;
-import java.util.UUID;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
-import java.util.stream.Stream;
-import org.apache.avro.Schema;
-import org.apache.avro.generic.GenericData;
-import org.apache.avro.generic.GenericRecord;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FSDataOutputStream;
-import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.Path;
 import org.apache.hudi.avro.model.HoodieCompactionPlan;
 import org.apache.hudi.common.model.HoodieAvroPayload;
 import org.apache.hudi.common.model.HoodieCommitMetadata;
@@ -56,6 +34,30 @@ import org.apache.hudi.common.util.HoodieAvroUtils;
 import org.apache.hudi.common.util.Option;
 import org.apache.hudi.exception.HoodieIOException;
 
+import org.apache.avro.Schema;
+import org.apache.avro.generic.GenericData;
+import org.apache.avro.generic.GenericRecord;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FSDataOutputStream;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+
+import java.io.IOException;
+import java.io.Serializable;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.Set;
+import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
+
 /**
  * Class to be used in tests to keep generating test inserts and updates against a corpus.
  * <p>
@@ -69,22 +71,17 @@ public class HoodieTestDataGenerator {
   public static final String DEFAULT_SECOND_PARTITION_PATH = "2015/03/16";
   public static final String DEFAULT_THIRD_PARTITION_PATH = "2015/03/17";
 
-  public static final String[] DEFAULT_PARTITION_PATHS = {
-      DEFAULT_FIRST_PARTITION_PATH,
-      DEFAULT_SECOND_PARTITION_PATH,
-      DEFAULT_THIRD_PARTITION_PATH
-  };
+  public static final String[] DEFAULT_PARTITION_PATHS =
+      {DEFAULT_FIRST_PARTITION_PATH, DEFAULT_SECOND_PARTITION_PATH, DEFAULT_THIRD_PARTITION_PATH};
   public static final int DEFAULT_PARTITION_DEPTH = 3;
-  public static String TRIP_EXAMPLE_SCHEMA = "{\"type\": \"record\"," + "\"name\": \"triprec\"," + "\"fields\": [ "
-      + "{\"name\": \"timestamp\",\"type\": \"double\"},"
-      + "{\"name\": \"_row_key\", \"type\": \"string\"},"
-      + "{\"name\": \"rider\", \"type\": \"string\"},"
-      + "{\"name\": \"driver\", \"type\": \"string\"},"
-      + "{\"name\": \"begin_lat\", \"type\": \"double\"},"
-      + "{\"name\": \"begin_lon\", \"type\": \"double\"},"
-      + "{\"name\": \"end_lat\", \"type\": \"double\"},"
-      + "{\"name\": \"end_lon\", \"type\": \"double\"},"
+  public static String TRIP_EXAMPLE_SCHEMA = "{\"type\": \"record\",\"name\": \"triprec\",\"fields\": [ "
+      + "{\"name\": \"timestamp\",\"type\": \"double\"},{\"name\": \"_row_key\", \"type\": \"string\"},"
+      + "{\"name\": \"rider\", \"type\": \"string\"},{\"name\": \"driver\", \"type\": \"string\"},"
+      + "{\"name\": \"begin_lat\", \"type\": \"double\"},{\"name\": \"begin_lon\", \"type\": \"double\"},"
+      + "{\"name\": \"end_lat\", \"type\": \"double\"},{\"name\": \"end_lon\", \"type\": \"double\"},"
       + "{\"name\":\"fare\",\"type\": \"double\"}]}";
+  public static String NULL_SCHEMA = Schema.create(Schema.Type.NULL).toString();
+  public static String TRIP_HIVE_COLUMN_TYPES = "double,string,string,string,double,double,double,double,double";
   public static Schema avroSchema = new Schema.Parser().parse(TRIP_EXAMPLE_SCHEMA);
   public static Schema avroSchemaWithMetadataFields = HoodieAvroUtils.addMetadataFields(avroSchema);
 
@@ -148,19 +145,30 @@ public class HoodieTestDataGenerator {
     createCommitFile(basePath, commitTime, HoodieTestUtils.getDefaultHadoopConf());
   }
 
-  public static void createCommitFile(String basePath, String commitTime, Configuration configuration)
-      throws IOException {
-    Path commitFile = new Path(
-        basePath + "/" + HoodieTableMetaClient.METAFOLDER_NAME + "/" + HoodieTimeline.makeCommitFileName(commitTime));
-    FileSystem fs = FSUtils.getFs(basePath, configuration);
-    FSDataOutputStream os = fs.create(commitFile, true);
-    HoodieCommitMetadata commitMetadata = new HoodieCommitMetadata();
-    try {
-      // Write empty commit metadata
-      os.writeBytes(new String(commitMetadata.toJsonString().getBytes(StandardCharsets.UTF_8)));
-    } finally {
-      os.close();
-    }
+  public static void createCommitFile(String basePath, String commitTime, Configuration configuration) {
+    Arrays.asList(HoodieTimeline.makeCommitFileName(commitTime), HoodieTimeline.makeInflightCommitFileName(commitTime),
+        HoodieTimeline.makeRequestedCommitFileName(commitTime)).forEach(f -> {
+          Path commitFile = new Path(
+              basePath + "/" + HoodieTableMetaClient.METAFOLDER_NAME + "/" + f);
+          FSDataOutputStream os = null;
+          try {
+            FileSystem fs = FSUtils.getFs(basePath, configuration);
+            os = fs.create(commitFile, true);
+            HoodieCommitMetadata commitMetadata = new HoodieCommitMetadata();
+            // Write empty commit metadata
+            os.writeBytes(new String(commitMetadata.toJsonString().getBytes(StandardCharsets.UTF_8)));
+          } catch (IOException ioe) {
+            throw new HoodieIOException(ioe.getMessage(), ioe);
+          } finally {
+            if (null != os) {
+              try {
+                os.close();
+              } catch (IOException e) {
+                throw new HoodieIOException(e.getMessage(), e);
+              }
+            }
+          }
+        });
   }
 
   public static void createCompactionRequestedFile(String basePath, String commitTime, Configuration configuration)
@@ -174,8 +182,8 @@ public class HoodieTestDataGenerator {
 
   public static void createCompactionAuxiliaryMetadata(String basePath, HoodieInstant instant,
       Configuration configuration) throws IOException {
-    Path commitFile = new Path(
-        basePath + "/" + HoodieTableMetaClient.AUXILIARYFOLDER_NAME + "/" + instant.getFileName());
+    Path commitFile =
+        new Path(basePath + "/" + HoodieTableMetaClient.AUXILIARYFOLDER_NAME + "/" + instant.getFileName());
     FileSystem fs = FSUtils.getFs(basePath, configuration);
     FSDataOutputStream os = fs.create(commitFile, true);
     HoodieCompactionPlan workload = new HoodieCompactionPlan();
@@ -189,8 +197,8 @@ public class HoodieTestDataGenerator {
 
   public static void createSavepointFile(String basePath, String commitTime, Configuration configuration)
       throws IOException {
-    Path commitFile = new Path(basePath + "/" + HoodieTableMetaClient.METAFOLDER_NAME
-        + "/" + HoodieTimeline.makeSavePointFileName(commitTime));
+    Path commitFile = new Path(basePath + "/" + HoodieTableMetaClient.METAFOLDER_NAME + "/"
+        + HoodieTimeline.makeSavePointFileName(commitTime));
     FileSystem fs = FSUtils.getFs(basePath, configuration);
     FSDataOutputStream os = fs.create(commitFile, true);
     HoodieCommitMetadata commitMetadata = new HoodieCommitMetadata();
@@ -212,7 +220,7 @@ public class HoodieTestDataGenerator {
   /**
    * Generates new inserts, uniformly across the partition paths above. It also updates the list of existing keys.
    */
-  public Stream<HoodieRecord> generateInsertsStream(String commitTime, Integer n)  {
+  public Stream<HoodieRecord> generateInsertsStream(String commitTime, Integer n) {
     int currSize = getNumExistingKeys();
 
     return IntStream.range(0, n).boxed().map(i -> {
@@ -233,16 +241,15 @@ public class HoodieTestDataGenerator {
 
   public List<HoodieRecord> generateSameKeyInserts(String commitTime, List<HoodieRecord> origin) throws IOException {
     List<HoodieRecord> copy = new ArrayList<>();
-    for (HoodieRecord r: origin) {
+    for (HoodieRecord r : origin) {
       HoodieKey key = r.getKey();
-      HoodieRecord record = new HoodieRecord(key,  generateRandomValue(key, commitTime));
+      HoodieRecord record = new HoodieRecord(key, generateRandomValue(key, commitTime));
       copy.add(record);
     }
     return copy;
   }
 
-  public List<HoodieRecord> generateInsertsWithHoodieAvroPayload(String commitTime, int limit) throws
-      IOException {
+  public List<HoodieRecord> generateInsertsWithHoodieAvroPayload(String commitTime, int limit) throws IOException {
     List<HoodieRecord> inserts = new ArrayList<>();
     int currSize = getNumExistingKeys();
     for (int i = 0; i < limit; i++) {
@@ -290,8 +297,8 @@ public class HoodieTestDataGenerator {
   }
 
   public HoodieRecord generateDeleteRecord(HoodieKey key) throws IOException {
-    TestRawTripPayload payload = new TestRawTripPayload(Option.empty(), key.getRecordKey(), key.getPartitionPath(),
-        null, true);
+    TestRawTripPayload payload =
+        new TestRawTripPayload(Option.empty(), key.getRecordKey(), key.getPartitionPath(), null, true);
     return new HoodieRecord(key, payload);
   }
 
@@ -309,7 +316,8 @@ public class HoodieTestDataGenerator {
   }
 
   /**
-   * Generates new updates, randomly distributed across the keys above. There can be duplicates within the returned list
+   * Generates new updates, randomly distributed across the keys above. There can be duplicates within the returned
+   * list
    *
    * @param commitTime Commit Timestamp
    * @param n Number of updates (including dups)
@@ -334,6 +342,17 @@ public class HoodieTestDataGenerator {
    */
   public List<HoodieRecord> generateUniqueUpdates(String commitTime, Integer n) {
     return generateUniqueUpdatesStream(commitTime, n).collect(Collectors.toList());
+  }
+
+  /**
+   * Generates deduped delete of keys previously inserted, randomly distributed across the keys above.
+   *
+   * @param commitTime Commit Timestamp
+   * @param n Number of unique records
+   * @return list of hoodie record updates
+   */
+  public List<HoodieKey> generateUniqueDeletes(String commitTime, Integer n) {
+    return generateUniqueDeleteStream(commitTime, n).collect(Collectors.toList());
   }
 
   /**
@@ -367,6 +386,33 @@ public class HoodieTestDataGenerator {
     });
   }
 
+  /**
+   * Generates deduped delete of keys previously inserted, randomly distributed across the keys above.
+   *
+   * @param commitTime Commit Timestamp
+   * @param n Number of unique records
+   * @return stream of hoodie record updates
+   */
+  public Stream<HoodieKey> generateUniqueDeleteStream(String commitTime, Integer n) {
+    final Set<KeyPartition> used = new HashSet<>();
+
+    if (n > numExistingKeys) {
+      throw new IllegalArgumentException("Requested unique deletes is greater than number of available keys");
+    }
+
+    return IntStream.range(0, n).boxed().map(i -> {
+      int index = numExistingKeys == 1 ? 0 : rand.nextInt(numExistingKeys - 1);
+      KeyPartition kp = existingKeys.get(index);
+      // Find the available keyPartition starting from randomly chosen one.
+      while (used.contains(kp)) {
+        index = (index + 1) % numExistingKeys;
+        kp = existingKeys.get(index);
+      }
+      used.add(kp);
+      return kp.key;
+    });
+  }
+
   public String[] getPartitionPaths() {
     return partitionPaths;
   }
@@ -376,6 +422,7 @@ public class HoodieTestDataGenerator {
   }
 
   public static class KeyPartition implements Serializable {
+
     HoodieKey key;
     String partitionPath;
   }

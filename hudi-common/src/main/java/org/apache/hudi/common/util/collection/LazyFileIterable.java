@@ -18,13 +18,14 @@
 
 package org.apache.hudi.common.util.collection;
 
+import org.apache.hudi.exception.HoodieException;
+
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
-import org.apache.hudi.exception.HoodieException;
 
 /**
  * Iterable to lazily fetch values spilled to disk. This class uses RandomAccessFile to randomly access the position of
@@ -66,12 +67,9 @@ public class LazyFileIterable<T, R> implements Iterable<R> {
       readOnlyFileHandle.seek(0);
 
       // sort the map in increasing order of offset of value so disk seek is only in one(forward) direction
-      this.metadataIterator = map
-          .entrySet()
-          .stream()
-          .sorted(
-              (Map.Entry<T, DiskBasedMap.ValueMetadata> o1, Map.Entry<T, DiskBasedMap.ValueMetadata> o2) ->
-                  o1.getValue().getOffsetOfValue().compareTo(o2.getValue().getOffsetOfValue()))
+      this.metadataIterator = map.entrySet().stream()
+          .sorted((Map.Entry<T, DiskBasedMap.ValueMetadata> o1, Map.Entry<T, DiskBasedMap.ValueMetadata> o2) -> o1
+              .getValue().getOffsetOfValue().compareTo(o2.getValue().getOffsetOfValue()))
           .collect(Collectors.toList()).iterator();
       this.addShutdownHook();
     }
