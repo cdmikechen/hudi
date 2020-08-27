@@ -18,6 +18,7 @@
 
 package org.apache.hudi.config;
 
+import org.apache.hudi.common.config.DefaultHoodieConfig;
 import org.apache.hudi.metrics.MetricsReporterType;
 
 import javax.annotation.concurrent.Immutable;
@@ -57,6 +58,10 @@ public class HoodieMetricsConfig extends DefaultHoodieConfig {
 
   public static final String GRAPHITE_METRIC_PREFIX = GRAPHITE_PREFIX + ".metric.prefix";
 
+  // User defined
+  public static final String METRICS_REPORTER_CLASS = METRIC_PREFIX + ".reporter.class";
+  public static final String DEFAULT_METRICS_REPORTER_CLASS = "";
+
   private HoodieMetricsConfig(Properties props) {
     super(props);
   }
@@ -70,12 +75,9 @@ public class HoodieMetricsConfig extends DefaultHoodieConfig {
     private final Properties props = new Properties();
 
     public Builder fromFile(File propertiesFile) throws IOException {
-      FileReader reader = new FileReader(propertiesFile);
-      try {
+      try (FileReader reader = new FileReader(propertiesFile)) {
         this.props.load(reader);
         return this;
-      } finally {
-        reader.close();
       }
     }
 
@@ -104,8 +106,23 @@ public class HoodieMetricsConfig extends DefaultHoodieConfig {
       return this;
     }
 
+    public Builder toJmxHost(String host) {
+      props.setProperty(JMX_HOST, host);
+      return this;
+    }
+
+    public Builder onJmxPort(String port) {
+      props.setProperty(JMX_PORT, port);
+      return this;
+    }
+
     public Builder usePrefix(String prefix) {
       props.setProperty(GRAPHITE_METRIC_PREFIX, prefix);
+      return this;
+    }
+
+    public Builder withReporterClass(String className) {
+      props.setProperty(METRICS_REPORTER_CLASS, className);
       return this;
     }
 
@@ -118,8 +135,20 @@ public class HoodieMetricsConfig extends DefaultHoodieConfig {
           DEFAULT_GRAPHITE_SERVER_HOST);
       setDefaultOnCondition(props, !props.containsKey(GRAPHITE_SERVER_PORT), GRAPHITE_SERVER_PORT,
           String.valueOf(DEFAULT_GRAPHITE_SERVER_PORT));
-      setDefaultOnCondition(props, !props.containsKey(GRAPHITE_SERVER_PORT), GRAPHITE_SERVER_PORT,
-          String.valueOf(DEFAULT_GRAPHITE_SERVER_PORT));
+      setDefaultOnCondition(props, !props.containsKey(JMX_HOST), JMX_HOST,
+          DEFAULT_JMX_HOST);
+      setDefaultOnCondition(props, !props.containsKey(JMX_PORT), JMX_PORT,
+          String.valueOf(DEFAULT_JMX_PORT));
+      MetricsReporterType reporterType = MetricsReporterType.valueOf(props.getProperty(METRICS_REPORTER_TYPE));
+      setDefaultOnCondition(props, reporterType == MetricsReporterType.DATADOG,
+          HoodieMetricsDatadogConfig.newBuilder().fromProperties(props).build());
+      setDefaultOnCondition(props, !props.containsKey(METRICS_REPORTER_CLASS),
+              METRICS_REPORTER_CLASS, DEFAULT_METRICS_REPORTER_CLASS);
+      setDefaultOnCondition(props, reporterType == MetricsReporterType.PROMETHEUS_PUSHGATEWAY,
+              HoodieMetricsPrometheusConfig.newBuilder().fromProperties(props).build());
+      setDefaultOnCondition(props, reporterType == MetricsReporterType.PROMETHEUS,
+              HoodieMetricsPrometheusConfig.newBuilder().fromProperties(props).build());
+
       return config;
     }
   }

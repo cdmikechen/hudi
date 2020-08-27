@@ -17,20 +17,29 @@
 
 package org.apache.hudi
 
-import com.databricks.spark.avro.SchemaConverters
-import org.apache.avro.generic.GenericRecord
-import org.apache.avro.{Schema, SchemaBuilder}
+import org.apache.avro.generic.{GenericRecord, GenericRecordBuilder, IndexedRecord}
 import org.apache.hudi.common.model.HoodieKey
+import org.apache.avro.Schema
+import org.apache.hudi.avro.HoodieAvroUtils
 import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.avro.SchemaConverters
 import org.apache.spark.sql.catalyst.encoders.RowEncoder
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
 
+import scala.collection.JavaConverters._
 
 object AvroConversionUtils {
 
   def createRdd(df: DataFrame, structName: String, recordNamespace: String): RDD[GenericRecord] = {
-    val dataType = df.schema
+    val avroSchema = convertStructTypeToAvroSchema(df.schema, structName, recordNamespace)
+    createRdd(df, avroSchema, structName, recordNamespace)
+  }
+
+  def createRdd(df: DataFrame, avroSchema: Schema, structName: String, recordNamespace: String)
+  : RDD[GenericRecord] = {
+    // Use the Avro schema to derive the StructType which has the correct nullability information
+    val dataType = SchemaConverters.toSqlType(avroSchema).dataType.asInstanceOf[StructType]
     val encoder = RowEncoder.apply(dataType).resolveAndBind()
     df.queryExecution.toRdd.map(encoder.fromRow)
       .mapPartitions { records =>
@@ -43,7 +52,7 @@ object AvroConversionUtils {
   }
 
   def createRddForDeletes(df: DataFrame, rowField: String, partitionField: String): RDD[HoodieKey] = {
-    df.rdd.map(row => (new HoodieKey(row.getAs[String](rowField), row.getAs[String](partitionField))))
+    df.rdd.map(row => new HoodieKey(row.getAs[String](rowField), row.getAs[String](partitionField)))
   }
 
   def createDataFrame(rdd: RDD[GenericRecord], schemaStr: String, ss: SparkSession): Dataset[Row] = {
@@ -58,28 +67,33 @@ object AvroConversionUtils {
           val convertor = AvroConversionHelper.createConverterToRow(schema, dataType)
           records.map { x => convertor(x).asInstanceOf[Row] }
         }
-      }, convertAvroSchemaToStructType(new Schema.Parser().parse(schemaStr))).asInstanceOf[Dataset[Row]]
-    }
-  }
-
-  def getNewRecordNamespace(elementDataType: DataType,
-                            currentRecordNamespace: String,
-                            elementName: String): String = {
-
-    elementDataType match {
-      case StructType(_) => s"$currentRecordNamespace.$elementName"
-      case _ => currentRecordNamespace
+      }, convertAvroSchemaToStructType(new Schema.Parser().parse(schemaStr)))
     }
   }
 
   def convertStructTypeToAvroSchema(structType: StructType,
                                     structName: String,
                                     recordNamespace: String): Schema = {
-    val builder = SchemaBuilder.record(structName).namespace(recordNamespace)
-    SchemaConverters.convertStructToAvro(structType, builder, recordNamespace)
+    SchemaConverters.toAvroType(structType, nullable = false, structName, recordNamespace)
   }
 
   def convertAvroSchemaToStructType(avroSchema: Schema): StructType = {
-    SchemaConverters.toSqlType(avroSchema).dataType.asInstanceOf[StructType];
+    SchemaConverters.toSqlType(avroSchema).dataType.asInstanceOf[StructType]
+  }
+
+  def buildAvroRecordBySchema(record: IndexedRecord,
+                              requiredSchema: Schema,
+                              requiredPos: List[Int],
+                              recordBuilder: GenericRecordBuilder): GenericRecord = {
+    val requiredFields = requiredSchema.getFields.asScala
+    assert(requiredFields.length == requiredPos.length)
+    val positionIterator = requiredPos.iterator
+    requiredFields.foreach(f => recordBuilder.set(f, record.get(positionIterator.next())))
+    recordBuilder.build()
+  }
+
+  def getAvroRecordNameAndNamespace(tableName: String): (String, String) = {
+    val name = HoodieAvroUtils.sanitizeName(tableName)
+    (s"${name}_record", s"hoodie.${name}")
   }
 }

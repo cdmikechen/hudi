@@ -44,8 +44,86 @@
     "name" : "end_lon",
     "type" : "double"
   }, {
+    "name" : "distance_in_meters",
+    "type" : "int"
+  }, {
+    "name" : "seconds_since_epoch",
+    "type" : "long"
+  }, {
+    "name" : "weight",
+    "type" : "float"
+  },{
+    "name" : "nation",
+    "type" : "bytes"
+  },{
+    "name" : "current_date",
+    "type" : {
+      "type" : "int",
+      "logicalType" : "date"
+      }
+  },{
+    "name" : "current_ts",
+    "type" : {
+      "type" : "long"
+      }
+  },{
+    "name" : "height",
+    "type" : {
+      "type" : "fixed",
+      "name" : "abc",
+      "size" : 5,
+      "logicalType" : "decimal",
+      "precision" : 10,
+      "scale": 6
+      }
+  }, {
+    "name" :"city_to_state",
+    "type" : {
+      "type" : "map",
+      "values": "string"
+    }
+  },
+  {
     "name" : "fare",
-    "type" : "double"
+    "type" : {
+      "type" : "record",
+      "name" : "fare",
+      "fields" : [
+        {
+         "name" : "amount",
+         "type" : "double"
+        },
+        {
+         "name" : "currency",
+         "type" : "string"
+        }
+      ]
+    }
+  },
+  {
+    "name" : "tip_history",
+    "type" : {
+      "type" : "array",
+      "items" : {
+        "type" : "record",
+        "name" : "tip_history",
+        "fields" : [
+          {
+            "name" : "amount",
+            "type" : "double"
+          },
+          {
+            "name" : "currency",
+            "type" : "string"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name" : "_hoodie_is_deleted",
+    "type" : "boolean",
+    "default" : false
   } ]
 }
 

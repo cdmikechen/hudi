@@ -18,12 +18,13 @@
 
 package org.apache.hudi.utilities.sources;
 
+import org.apache.hudi.ApiMaturityLevel;
+import org.apache.hudi.PublicAPIClass;
+import org.apache.hudi.PublicAPIMethod;
+import org.apache.hudi.common.config.TypedProperties;
 import org.apache.hudi.common.util.Option;
-import org.apache.hudi.common.util.TypedProperties;
 import org.apache.hudi.utilities.schema.SchemaProvider;
 
-import org.apache.log4j.LogManager;
-import org.apache.log4j.Logger;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.sql.SparkSession;
 
@@ -32,8 +33,8 @@ import java.io.Serializable;
 /**
  * Represents a source from which we can tail data. Assumes a constructor that takes properties.
  */
+@PublicAPIClass(maturity = ApiMaturityLevel.STABLE)
 public abstract class Source<T> implements Serializable {
-  private static final Logger LOG = LogManager.getLogger(Source.class);
 
   public enum SourceType {
     JSON, AVRO, ROW
@@ -60,6 +61,7 @@ public abstract class Source<T> implements Serializable {
     this.sourceType = sourceType;
   }
 
+  @PublicAPIMethod(maturity = ApiMaturityLevel.STABLE)
   protected abstract InputBatch<T> fetchNewData(Option<String> lastCkptStr, long sourceLimit);
 
   /**

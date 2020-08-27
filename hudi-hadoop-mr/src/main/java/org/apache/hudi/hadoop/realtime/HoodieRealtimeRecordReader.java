@@ -42,13 +42,13 @@ public class HoodieRealtimeRecordReader implements RecordReader<NullWritable, Ar
   private static final Logger LOG = LogManager.getLogger(HoodieRealtimeRecordReader.class);
   private final RecordReader<NullWritable, ArrayWritable> reader;
 
-  public HoodieRealtimeRecordReader(HoodieRealtimeFileSplit split, JobConf job,
+  public HoodieRealtimeRecordReader(RealtimeSplit split, JobConf job,
       RecordReader<NullWritable, ArrayWritable> realReader) {
     this.reader = constructRecordReader(split, job, realReader);
   }
 
   public static boolean canSkipMerging(JobConf jobConf) {
-    return Boolean.valueOf(jobConf.get(REALTIME_SKIP_MERGE_PROP, DEFAULT_REALTIME_SKIP_MERGE));
+    return Boolean.parseBoolean(jobConf.get(REALTIME_SKIP_MERGE_PROP, DEFAULT_REALTIME_SKIP_MERGE));
   }
 
   /**
@@ -59,13 +59,14 @@ public class HoodieRealtimeRecordReader implements RecordReader<NullWritable, Ar
    * @param realReader Parquet Record Reader
    * @return Realtime Reader
    */
-  private static RecordReader<NullWritable, ArrayWritable> constructRecordReader(HoodieRealtimeFileSplit split,
+  private static RecordReader<NullWritable, ArrayWritable> constructRecordReader(RealtimeSplit split,
       JobConf jobConf, RecordReader<NullWritable, ArrayWritable> realReader) {
     try {
       if (canSkipMerging(jobConf)) {
         LOG.info("Enabling un-merged reading of realtime records");
         return new RealtimeUnmergedRecordReader(split, jobConf, realReader);
       }
+      LOG.info("Enabling merged reading of realtime records for split " + split);
       return new RealtimeCompactedRecordReader(split, jobConf, realReader);
     } catch (IOException ex) {
       LOG.error("Got exception when constructing record reader", ex);

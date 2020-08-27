@@ -17,18 +17,27 @@
 
 package org.apache.hudi
 
+
+import com.google.common.collect.Lists
+import org.apache.avro.Schema
+import org.apache.hadoop.fs.GlobPattern
 import org.apache.hadoop.fs.Path
+import org.apache.hudi.avro.HoodieAvroUtils
+import org.apache.hudi.common.bootstrap.index.BootstrapIndex
 import org.apache.hudi.common.model.{HoodieCommitMetadata, HoodieRecord, HoodieTableType}
-import org.apache.hudi.common.table.HoodieTableMetaClient
+import org.apache.hudi.common.table.{HoodieTableMetaClient, TableSchemaResolver}
+import org.apache.hudi.common.table.timeline.HoodieTimeline
 import org.apache.hudi.common.util.ParquetUtils
 import org.apache.hudi.config.HoodieWriteConfig
 import org.apache.hudi.exception.HoodieException
 import org.apache.hudi.table.HoodieTable
+
+import org.apache.hadoop.fs.GlobPattern
 import org.apache.log4j.LogManager
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.sources.{BaseRelation, TableScan}
-import org.apache.spark.sql.types.StructType
-import org.apache.spark.sql.{Row, SQLContext}
+import org.apache.spark.sql.types.{StringType, StructField, StructType}
+import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 
 import scala.collection.JavaConversions._
 import scala.collection.mutable
@@ -46,16 +55,18 @@ class IncrementalRelation(val sqlContext: SQLContext,
 
   private val log = LogManager.getLogger(classOf[IncrementalRelation])
 
-  val fs = new Path(basePath).getFileSystem(sqlContext.sparkContext.hadoopConfiguration)
-  val metaClient = new HoodieTableMetaClient(sqlContext.sparkContext.hadoopConfiguration, basePath, true)
-  // MOR datasets not supported yet
+
+  val skeletonSchema: StructType = HoodieSparkUtils.getMetaSchema
+  private val metaClient = new HoodieTableMetaClient(sqlContext.sparkContext.hadoopConfiguration, basePath, true)
+
+  // MOR tables not supported yet
   if (metaClient.getTableType.equals(HoodieTableType.MERGE_ON_READ)) {
-    throw new HoodieException("Incremental view not implemented yet, for merge-on-read datasets")
+    throw new HoodieException("Incremental view not implemented yet, for merge-on-read tables")
   }
   // TODO : Figure out a valid HoodieWriteConfig
-  val hoodieTable = HoodieTable.getHoodieTable(metaClient, HoodieWriteConfig.newBuilder().withPath(basePath).build(),
-    sqlContext.sparkContext)
-  val commitTimeline = hoodieTable.getMetaClient.getCommitTimeline.filterCompletedInstants()
+  private val hoodieTable = HoodieTable.create(metaClient, HoodieWriteConfig.newBuilder().withPath(basePath).build(),
+    sqlContext.sparkContext.hadoopConfiguration)
+  private val commitTimeline = hoodieTable.getMetaClient.getCommitTimeline.filterCompletedInstants()
   if (commitTimeline.empty()) {
     throw new HoodieException("No instants to incrementally pull")
   }
@@ -64,27 +75,28 @@ class IncrementalRelation(val sqlContext: SQLContext,
       s"option ${DataSourceReadOptions.BEGIN_INSTANTTIME_OPT_KEY}")
   }
 
-  val lastInstant = commitTimeline.lastInstant().get()
+  private val lastInstant = commitTimeline.lastInstant().get()
 
-  val commitsToReturn = commitTimeline.findInstantsInRange(
+  private val commitsToReturn = commitTimeline.findInstantsInRange(
     optParams(DataSourceReadOptions.BEGIN_INSTANTTIME_OPT_KEY),
     optParams.getOrElse(DataSourceReadOptions.END_INSTANTTIME_OPT_KEY, lastInstant.getTimestamp))
     .getInstants.iterator().toList
 
   // use schema from a file produced in the latest instant
-  val latestSchema = {
-    // use last instant if instant range is empty
-    val instant = commitsToReturn.lastOption.getOrElse(lastInstant)
-    val latestMeta = HoodieCommitMetadata
-          .fromBytes(commitTimeline.getInstantDetails(instant).get, classOf[HoodieCommitMetadata])
-    val metaFilePath = latestMeta.getFileIdAndFullPaths(basePath).values().iterator().next()
-    AvroConversionUtils.convertAvroSchemaToStructType(ParquetUtils.readAvroSchema(
-      sqlContext.sparkContext.hadoopConfiguration, new Path(metaFilePath)))
+  val latestSchema: StructType = {
+    log.info("Inferring schema..")
+    val schemaResolver = new TableSchemaResolver(metaClient)
+    val tableSchema = schemaResolver.getTableAvroSchemaWithoutMetadataFields
+    val dataSchema = AvroConversionUtils.convertAvroSchemaToStructType(tableSchema)
+    StructType(skeletonSchema.fields ++ dataSchema.fields)
   }
 
-  val filters = {
+
+  private val filters = {
     if (optParams.contains(DataSourceReadOptions.PUSH_DOWN_INCR_FILTERS_OPT_KEY)) {
-      val filterStr = optParams.get(DataSourceReadOptions.PUSH_DOWN_INCR_FILTERS_OPT_KEY).getOrElse("")
+      val filterStr = optParams.getOrElse(
+        DataSourceReadOptions.PUSH_DOWN_INCR_FILTERS_OPT_KEY,
+        DataSourceReadOptions.DEFAULT_PUSH_DOWN_FILTERS_OPT_VAL)
       filterStr.split(",").filter(!_.isEmpty)
     } else {
       Array[String]()
@@ -94,27 +106,69 @@ class IncrementalRelation(val sqlContext: SQLContext,
   override def schema: StructType = latestSchema
 
   override def buildScan(): RDD[Row] = {
-    val fileIdToFullPath = mutable.HashMap[String, String]()
+    val regularFileIdToFullPath = mutable.HashMap[String, String]()
+    var metaBootstrapFileIdToFullPath = mutable.HashMap[String, String]()
+
     for (commit <- commitsToReturn) {
       val metadata: HoodieCommitMetadata = HoodieCommitMetadata.fromBytes(commitTimeline.getInstantDetails(commit)
         .get, classOf[HoodieCommitMetadata])
-      fileIdToFullPath ++= metadata.getFileIdAndFullPaths(basePath).toMap
+
+      if (HoodieTimeline.METADATA_BOOTSTRAP_INSTANT_TS == commit.getTimestamp) {
+        metaBootstrapFileIdToFullPath ++= metadata.getFileIdAndFullPaths(basePath).toMap
+      } else {
+        regularFileIdToFullPath ++= metadata.getFileIdAndFullPaths(basePath).toMap
+      }
+    }
+
+    if (metaBootstrapFileIdToFullPath.nonEmpty) {
+      // filer out meta bootstrap files that have had more commits since metadata bootstrap
+      metaBootstrapFileIdToFullPath = metaBootstrapFileIdToFullPath
+        .filterNot(fileIdFullPath => regularFileIdToFullPath.contains(fileIdFullPath._1))
+    }
+
+    val pathGlobPattern = optParams.getOrElse(
+      DataSourceReadOptions.INCR_PATH_GLOB_OPT_KEY,
+      DataSourceReadOptions.DEFAULT_INCR_PATH_GLOB_OPT_VAL)
+    val (filteredRegularFullPaths, filteredMetaBootstrapFullPaths) = {
+      if(!pathGlobPattern.equals(DataSourceReadOptions.DEFAULT_INCR_PATH_GLOB_OPT_VAL)) {
+        val globMatcher = new GlobPattern("*" + pathGlobPattern)
+        (regularFileIdToFullPath.filter(p => globMatcher.matches(p._2)).values,
+          metaBootstrapFileIdToFullPath.filter(p => globMatcher.matches(p._2)).values)
+      } else {
+        (regularFileIdToFullPath.values, metaBootstrapFileIdToFullPath.values)
+      }
     }
     // unset the path filter, otherwise if end_instant_time is not the latest instant, path filter set for RO view
     // will filter out all the files incorrectly.
     sqlContext.sparkContext.hadoopConfiguration.unset("mapreduce.input.pathFilter.class")
     val sOpts = optParams.filter(p => !p._1.equalsIgnoreCase("path"))
-    if (fileIdToFullPath.isEmpty) {
+    if (filteredRegularFullPaths.isEmpty && filteredMetaBootstrapFullPaths.isEmpty) {
       sqlContext.sparkContext.emptyRDD[Row]
     } else {
       log.info("Additional Filters to be applied to incremental source are :" + filters)
-      filters.foldLeft(sqlContext.read.options(sOpts)
-        .schema(latestSchema)
-        .parquet(fileIdToFullPath.values.toList: _*)
-        .filter(String.format("%s >= '%s'", HoodieRecord.COMMIT_TIME_METADATA_FIELD, commitsToReturn.head.getTimestamp))
-        .filter(String.format("%s <= '%s'",
-          HoodieRecord.COMMIT_TIME_METADATA_FIELD, commitsToReturn.last.getTimestamp)))((e, f) => e.filter(f))
-        .toDF().rdd
+
+      var df: DataFrame = sqlContext.createDataFrame(sqlContext.sparkContext.emptyRDD[Row], latestSchema)
+
+      if (metaBootstrapFileIdToFullPath.nonEmpty) {
+        df = sqlContext.sparkSession.read
+               .format("hudi")
+               .schema(latestSchema)
+               .option(DataSourceReadOptions.READ_PATHS_OPT_KEY, filteredMetaBootstrapFullPaths.mkString(","))
+               .load()
+      }
+
+      if (regularFileIdToFullPath.nonEmpty)
+      {
+        df = df.union(sqlContext.read.options(sOpts)
+                        .schema(latestSchema)
+                        .parquet(filteredRegularFullPaths.toList: _*)
+                        .filter(String.format("%s >= '%s'", HoodieRecord.COMMIT_TIME_METADATA_FIELD,
+                          commitsToReturn.head.getTimestamp))
+                        .filter(String.format("%s <= '%s'", HoodieRecord.COMMIT_TIME_METADATA_FIELD,
+                          commitsToReturn.last.getTimestamp)))
+      }
+
+      filters.foldLeft(df)((e, f) => e.filter(f)).rdd
     }
   }
 }

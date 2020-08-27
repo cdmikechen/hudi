@@ -18,21 +18,23 @@
 
 package org.apache.hudi.metrics;
 
+import org.apache.hudi.common.metrics.Registry;
+import org.apache.hudi.common.util.Option;
 import org.apache.hudi.config.HoodieWriteConfig;
 import org.apache.hudi.exception.HoodieException;
 
-import com.codahale.metrics.Gauge;
 import com.codahale.metrics.MetricRegistry;
-import com.google.common.io.Closeables;
 import org.apache.log4j.LogManager;
 import org.apache.log4j.Logger;
 
 import java.io.Closeable;
+import java.util.Map;
 
 /**
  * This is the main class of the metrics system.
  */
 public class Metrics {
+
   private static final Logger LOG = LogManager.getLogger(Metrics.class);
 
   private static volatile boolean initialized = false;
@@ -47,19 +49,23 @@ public class Metrics {
     if (reporter == null) {
       throw new RuntimeException("Cannot initialize Reporter.");
     }
-    // reporter.start();
+    reporter.start();
 
-    Runtime.getRuntime().addShutdownHook(new Thread() {
-      @Override
-      public void run() {
-        try {
-          reporter.report();
-          Closeables.close(reporter.getReporter(), true);
-        } catch (Exception e) {
-          e.printStackTrace();
+    Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+      try {
+        registerHoodieCommonMetrics();
+        reporter.report();
+        if (getReporter() != null) {
+          getReporter().close();
         }
+      } catch (Exception e) {
+        LOG.warn("Error while closing reporter", e);
       }
-    });
+    }));
+  }
+
+  private void registerHoodieCommonMetrics() {
+    registerGauges(Registry.getAllMetrics(true, true), Option.empty());
   }
 
   public static Metrics getInstance() {
@@ -79,10 +85,16 @@ public class Metrics {
     initialized = true;
   }
 
+  public static void registerGauges(Map<String, Long> metricsMap, Option<String> prefix) {
+    String metricPrefix = prefix.isPresent() ? prefix.get() + "." : "";
+    metricsMap.forEach((k, v) -> registerGauge(metricPrefix + k, v));
+  }
+
   public static void registerGauge(String metricName, final long value) {
     try {
       MetricRegistry registry = Metrics.getInstance().getRegistry();
-      registry.register(metricName, (Gauge<Long>) () -> value);
+      HoodieGauge guage = (HoodieGauge) registry.gauge(metricName, () -> new HoodieGauge<>(value));
+      guage.setValue(value);
     } catch (Exception e) {
       // Here we catch all exception, so the major upsert pipeline will not be affected if the
       // metrics system

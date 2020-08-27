@@ -18,12 +18,12 @@
 
 package org.apache.hudi.index.bloom;
 
+import org.apache.hudi.client.utils.LazyIterableIterator;
 import org.apache.hudi.common.model.HoodieKey;
 import org.apache.hudi.common.util.collection.Pair;
 import org.apache.hudi.config.HoodieWriteConfig;
 import org.apache.hudi.exception.HoodieException;
 import org.apache.hudi.exception.HoodieIndexException;
-import org.apache.hudi.func.LazyIterableIterator;
 import org.apache.hudi.io.HoodieKeyLookupHandle;
 import org.apache.hudi.io.HoodieKeyLookupHandle.KeyLookupResult;
 import org.apache.hudi.table.HoodieTable;
@@ -66,7 +66,8 @@ public class HoodieBloomIndexCheckFunction
     }
 
     @Override
-    protected void start() {}
+    protected void start() {
+    }
 
     @Override
     protected List<HoodieKeyLookupHandle.KeyLookupResult> computeNext() {
@@ -113,6 +114,7 @@ public class HoodieBloomIndexCheckFunction
     }
 
     @Override
-    protected void end() {}
+    protected void end() {
+    }
   }
 }

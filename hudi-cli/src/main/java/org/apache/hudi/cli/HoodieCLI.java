@@ -18,17 +18,18 @@
 
 package org.apache.hudi.cli;
 
-import org.apache.hudi.common.model.TimelineLayoutVersion;
+import org.apache.hudi.cli.utils.SparkTempViewProvider;
+import org.apache.hudi.cli.utils.TempViewProvider;
+import org.apache.hudi.common.fs.ConsistencyGuardConfig;
+import org.apache.hudi.common.fs.FSUtils;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
-import org.apache.hudi.common.util.ConsistencyGuardConfig;
-import org.apache.hudi.common.util.FSUtils;
+import org.apache.hudi.common.table.timeline.versioning.TimelineLayoutVersion;
 import org.apache.hudi.common.util.Option;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 
 import java.io.IOException;
-
 
 /**
  * This class is responsible to load table metadata and hoodie related configs.
@@ -40,15 +41,16 @@ public class HoodieCLI {
   public static FileSystem fs;
   public static CLIState state = CLIState.INIT;
   public static String basePath;
-  public static HoodieTableMetaClient tableMetadata;
+  protected static HoodieTableMetaClient tableMetadata;
   public static HoodieTableMetaClient syncTableMetadata;
   public static TimelineLayoutVersion layoutVersion;
+  private static TempViewProvider tempViewProvider;
 
   /**
    * Enum for CLI state.
    */
   public enum CLIState {
-    INIT, DATASET, SYNC
+    INIT, TABLE, SYNC
   }
 
   public static void setConsistencyGuardConfig(ConsistencyGuardConfig config) {
@@ -92,4 +94,37 @@ public class HoodieCLI {
     setLayoutVersion(layoutVersion);
     refreshTableMetadata();
   }
+
+  /**
+   * Get tableMetadata, throw NullPointerException when it is null.
+   *
+   * @return tableMetadata which is instance of HoodieTableMetaClient
+   */
+  public static HoodieTableMetaClient getTableMetaClient() {
+    if (tableMetadata == null) {
+      throw new NullPointerException("There is no hudi table. Please use connect command to set table first");
+    }
+    return tableMetadata;
+  }
+
+  public static synchronized TempViewProvider getTempViewProvider() {
+    if (tempViewProvider == null) {
+      tempViewProvider = new SparkTempViewProvider(HoodieCLI.class.getSimpleName());
+    }
+
+    return tempViewProvider;
+  }
+
+  /**
+   * Close tempViewProvider.
+   * <p/>
+   * For test, avoid multiple SparkContexts.
+   */
+  public static synchronized void closeTempViewProvider() {
+    if (tempViewProvider != null) {
+      tempViewProvider.close();
+      tempViewProvider = null;
+    }
+  }
+
 }

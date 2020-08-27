@@ -18,11 +18,11 @@
 
 package org.apache.hudi.timeline.service;
 
-import org.apache.hudi.common.SerializableConfiguration;
+import org.apache.hudi.common.config.SerializableConfiguration;
+import org.apache.hudi.common.fs.FSUtils;
 import org.apache.hudi.common.table.view.FileSystemViewManager;
 import org.apache.hudi.common.table.view.FileSystemViewStorageConfig;
 import org.apache.hudi.common.table.view.FileSystemViewStorageType;
-import org.apache.hudi.common.util.FSUtils;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
@@ -36,7 +36,7 @@ import java.io.IOException;
 import java.io.Serializable;
 
 /**
- * A stand alone timeline service exposing File-System View interfaces to clients.
+ * A standalone timeline service exposing File-System View interfaces to clients.
  */
 public class TimelineService {
 
@@ -74,7 +74,7 @@ public class TimelineService {
     @Parameter(names = {"--server-port", "-p"}, description = " Server Port")
     public Integer serverPort = 26754;
 
-    @Parameter(names = {"--view-storage", "-st"}, description = "View Storage Type. Defaut - SPILLABLE_DISK")
+    @Parameter(names = {"--view-storage", "-st"}, description = "View Storage Type. Default - SPILLABLE_DISK")
     public FileSystemViewStorageType viewStorageType = FileSystemViewStorageType.SPILLABLE_DISK;
 
     @Parameter(names = {"--max-view-mem-per-table", "-mv"},
@@ -157,7 +157,7 @@ public class TimelineService {
 
   public static void main(String[] args) throws Exception {
     final Config cfg = new Config();
-    JCommander cmd = new JCommander(cfg, args);
+    JCommander cmd = new JCommander(cfg, null, args);
     if (cfg.help) {
       cmd.usage();
       System.exit(1);
