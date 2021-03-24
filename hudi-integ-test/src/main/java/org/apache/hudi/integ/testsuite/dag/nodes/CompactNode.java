@@ -26,18 +26,30 @@ import org.apache.hudi.integ.testsuite.configuration.DeltaConfig.Config;
 import org.apache.hudi.integ.testsuite.dag.ExecutionContext;
 import org.apache.spark.api.java.JavaRDD;
 
+/**
+ * Represents a compact node in the DAG of operations for a workflow.
+ */
 public class CompactNode extends DagNode<JavaRDD<WriteStatus>> {
 
   public CompactNode(Config config) {
     this.config = config;
   }
 
+  /**
+   * Method helps to start the compact operation. It will compact the last pending compact instant in the timeline
+   * if it has one.
+   *
+   * @param executionContext Execution context to run this compaction
+   * @param curItrCount cur interation count.
+   * @throws Exception  will be thrown if any error occurred.
+   */
   @Override
-  public void execute(ExecutionContext executionContext) throws Exception {
-    HoodieTableMetaClient metaClient = new HoodieTableMetaClient(executionContext.getHoodieTestSuiteWriter().getConfiguration(),
-        executionContext.getHoodieTestSuiteWriter().getCfg().targetBasePath);
+  public void execute(ExecutionContext executionContext, int curItrCount) throws Exception {
+    HoodieTableMetaClient metaClient =
+        HoodieTableMetaClient.builder().setConf(executionContext.getHoodieTestSuiteWriter().getConfiguration()).setBasePath(executionContext.getHoodieTestSuiteWriter().getCfg().targetBasePath)
+            .build();
     Option<HoodieInstant> lastInstant = metaClient.getActiveTimeline()
-        .getCommitsAndCompactionTimeline().filterPendingCompactionTimeline().lastInstant();
+        .getWriteTimeline().filterPendingCompactionTimeline().lastInstant();
     if (lastInstant.isPresent()) {
       log.info("Compacting instant {}", lastInstant.get());
       this.result = executionContext.getHoodieTestSuiteWriter().compact(Option.of(lastInstant.get().getTimestamp()));

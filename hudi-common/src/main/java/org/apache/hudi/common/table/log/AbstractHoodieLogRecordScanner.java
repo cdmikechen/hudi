@@ -18,6 +18,11 @@
 
 package org.apache.hudi.common.table.log;
 
+import org.apache.avro.Schema;
+import org.apache.avro.generic.GenericRecord;
+import org.apache.avro.generic.IndexedRecord;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
 import org.apache.hudi.common.model.HoodieKey;
 import org.apache.hudi.common.model.HoodieLogFile;
 import org.apache.hudi.common.model.HoodieRecord;
@@ -27,16 +32,12 @@ import org.apache.hudi.common.table.log.block.HoodieAvroDataBlock;
 import org.apache.hudi.common.table.log.block.HoodieCommandBlock;
 import org.apache.hudi.common.table.log.block.HoodieDataBlock;
 import org.apache.hudi.common.table.log.block.HoodieDeleteBlock;
+import org.apache.hudi.common.table.log.block.HoodieHFileDataBlock;
 import org.apache.hudi.common.table.log.block.HoodieLogBlock;
 import org.apache.hudi.common.table.timeline.HoodieTimeline;
 import org.apache.hudi.common.util.SpillableMapUtils;
+import org.apache.hudi.exception.HoodieException;
 import org.apache.hudi.exception.HoodieIOException;
-
-import org.apache.avro.Schema;
-import org.apache.avro.generic.GenericRecord;
-import org.apache.avro.generic.IndexedRecord;
-import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.Path;
 import org.apache.log4j.LogManager;
 import org.apache.log4j.Logger;
 
@@ -51,6 +52,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 import static org.apache.hudi.common.table.log.block.HoodieLogBlock.HeaderMetadataType.INSTANT_TIME;
+import static org.apache.hudi.common.table.log.block.HoodieLogBlock.HoodieLogBlockType.COMMAND_BLOCK;
 import static org.apache.hudi.common.table.log.block.HoodieLogBlock.HoodieLogBlockType.CORRUPT_BLOCK;
 
 /**
@@ -78,7 +80,7 @@ public abstract class AbstractHoodieLogRecordScanner {
   // Merge strategy to use when combining records from log
   private final String payloadClassFQN;
   // Log File Paths
-  private final List<String> logFilePaths;
+  protected final List<String> logFilePaths;
   // Read Lazily flag
   private final boolean readBlocksLazily;
   // Reverse reader - Not implemented yet (NA -> Why do we need ?)
@@ -103,12 +105,11 @@ public abstract class AbstractHoodieLogRecordScanner {
   // Progress
   private float progress = 0.0f;
 
-  // TODO (NA) - Change this to a builder, this constructor is too long
   public AbstractHoodieLogRecordScanner(FileSystem fs, String basePath, List<String> logFilePaths, Schema readerSchema,
       String latestInstantTime, boolean readBlocksLazily, boolean reverseReader, int bufferSize) {
     this.readerSchema = readerSchema;
     this.latestInstantTime = latestInstantTime;
-    this.hoodieTableMetaClient = new HoodieTableMetaClient(fs.getConf(), basePath);
+    this.hoodieTableMetaClient = HoodieTableMetaClient.builder().setConf(fs.getConf()).setBasePath(basePath).build();
     // load class from the payload fully qualified class name
     this.payloadClassFQN = this.hoodieTableMetaClient.getTableConfig().getPayloadClass();
     this.totalLogFiles.addAndGet(logFilePaths.size());
@@ -124,6 +125,9 @@ public abstract class AbstractHoodieLogRecordScanner {
    */
   public void scan() {
     HoodieLogFormatReader logFormatReaderWrapper = null;
+    HoodieTimeline commitsTimeline = this.hoodieTableMetaClient.getCommitsTimeline();
+    HoodieTimeline completedInstantsTimeline = commitsTimeline.filterCompletedInstants();
+    HoodieTimeline inflightInstantsTimeline = commitsTimeline.filterInflights();
     try {
       // iterate over the paths
       logFormatReaderWrapper = new HoodieLogFormatReader(fs,
@@ -144,9 +148,19 @@ public abstract class AbstractHoodieLogRecordScanner {
           // hit a block with instant time greater than should be processed, stop processing further
           break;
         }
+        if (r.getBlockType() != CORRUPT_BLOCK && r.getBlockType() != COMMAND_BLOCK) {
+          String instantTime = r.getLogBlockHeader().get(INSTANT_TIME);
+          if (!completedInstantsTimeline.containsOrBeforeTimelineStarts(instantTime)
+              || inflightInstantsTimeline.containsInstant(instantTime)) {
+            // hit an uncommitted block possibly from a failed write, move to the next one and skip processing this one
+            continue;
+          }
+        }
         switch (r.getBlockType()) {
+          case HFILE_DATA_BLOCK:
           case AVRO_DATA_BLOCK:
-            LOG.info("Reading a data block from file " + logFile.getPath());
+            LOG.info("Reading a data block from file " + logFile.getPath() + " at instant "
+                + r.getLogBlockHeader().get(INSTANT_TIME));
             if (isNewInstantBlock(r) && !readBlocksLazily) {
               // If this is an avro data block belonging to a different commit/instant,
               // then merge the last blocks and records into the main result
@@ -200,8 +214,7 @@ public abstract class AbstractHoodieLogRecordScanner {
                     LOG.info("Rolling back the last corrupted log block read in " + logFile.getPath());
                     currentInstantLogBlocks.pop();
                     numBlocksRolledBack++;
-                  } else if (lastBlock.getBlockType() != CORRUPT_BLOCK
-                      && targetInstantForCommandBlock.contentEquals(lastBlock.getLogBlockHeader().get(INSTANT_TIME))) {
+                  } else if (targetInstantForCommandBlock.contentEquals(lastBlock.getLogBlockHeader().get(INSTANT_TIME))) {
                     // rollback last data block or delete block
                     LOG.info("Rolling back the last log block read in " + logFile.getPath());
                     currentInstantLogBlocks.pop();
@@ -240,9 +253,12 @@ public abstract class AbstractHoodieLogRecordScanner {
       }
       // Done
       progress = 1.0f;
+    } catch (IOException e) {
+      LOG.error("Got IOException when reading log file", e);
+      throw new HoodieIOException("IOException when reading log file ", e);
     } catch (Exception e) {
       LOG.error("Got exception when reading log file", e);
-      throw new HoodieIOException("IOException when reading log file ");
+      throw new HoodieException("Exception when reading log file ", e);
     } finally {
       try {
         if (null != logFormatReaderWrapper) {
@@ -273,10 +289,12 @@ public abstract class AbstractHoodieLogRecordScanner {
     List<IndexedRecord> recs = dataBlock.getRecords();
     totalLogRecords.addAndGet(recs.size());
     for (IndexedRecord rec : recs) {
-      HoodieRecord<? extends HoodieRecordPayload> hoodieRecord =
-          SpillableMapUtils.convertToHoodieRecordPayload((GenericRecord) rec, this.payloadClassFQN);
-      processNextRecord(hoodieRecord);
+      processNextRecord(createHoodieRecord(rec));
     }
+  }
+
+  protected HoodieRecord<?> createHoodieRecord(IndexedRecord rec) {
+    return SpillableMapUtils.convertToHoodieRecordPayload((GenericRecord) rec, this.payloadClassFQN);
   }
 
   /**
@@ -304,6 +322,9 @@ public abstract class AbstractHoodieLogRecordScanner {
       switch (lastBlock.getBlockType()) {
         case AVRO_DATA_BLOCK:
           processDataBlock((HoodieAvroDataBlock) lastBlock);
+          break;
+        case HFILE_DATA_BLOCK:
+          processDataBlock((HoodieHFileDataBlock) lastBlock);
           break;
         case DELETE_BLOCK:
           Arrays.stream(((HoodieDeleteBlock) lastBlock).getKeysToDelete()).forEach(this::processNextDeletedKey);
@@ -348,5 +369,29 @@ public abstract class AbstractHoodieLogRecordScanner {
 
   public long getTotalCorruptBlocks() {
     return totalCorruptBlocks.get();
+  }
+
+  /**
+   * Builder used to build {@code AbstractHoodieLogRecordScanner}.
+   */
+  public abstract static class Builder {
+
+    public abstract Builder withFileSystem(FileSystem fs);
+
+    public abstract Builder withBasePath(String basePath);
+
+    public abstract Builder withLogFilePaths(List<String> logFilePaths);
+
+    public abstract Builder withReaderSchema(Schema schema);
+
+    public abstract Builder withLatestInstantTime(String latestInstantTime);
+
+    public abstract Builder withReadBlocksLazily(boolean readBlocksLazily);
+
+    public abstract Builder withReverseReader(boolean reverseReader);
+
+    public abstract Builder withBufferSize(int bufferSize);
+
+    public abstract AbstractHoodieLogRecordScanner build();
   }
 }

@@ -23,6 +23,9 @@ import java.util.function.Function;
 import org.apache.hudi.integ.testsuite.configuration.DeltaConfig.Config;
 import org.apache.hudi.integ.testsuite.dag.ExecutionContext;
 
+/**
+ * A validate node helps to validate its parent nodes with given function.
+ */
 public class ValidateNode<R> extends DagNode {
 
   protected Function<List<DagNode>, R> function;
@@ -32,8 +35,15 @@ public class ValidateNode<R> extends DagNode {
     this.config = config;
   }
 
+  /**
+   * Method to start the validate operation. Exceptions will be thrown if its parent nodes exist and WAIT_FOR_PARENTS
+   * was set to true or default, but the parent nodes have not completed yet.
+   *
+   * @param executionContext Context to execute this node
+   * @param curItrCount current iteration count.
+   */
   @Override
-  public void execute(ExecutionContext executionContext) {
+  public void execute(ExecutionContext executionContext, int curItrCount) {
     if (this.getParentNodes().size() > 0 && (Boolean) this.config.getOtherConfigs().getOrDefault("WAIT_FOR_PARENTS",
         true)) {
       for (DagNode node : (List<DagNode>) this.getParentNodes()) {

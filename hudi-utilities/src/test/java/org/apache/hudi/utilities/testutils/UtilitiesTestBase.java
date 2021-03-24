@@ -19,6 +19,8 @@
 package org.apache.hudi.utilities.testutils;
 
 import java.io.FileInputStream;
+
+import org.apache.hudi.client.common.HoodieSparkEngineContext;
 import org.apache.hudi.common.config.TypedProperties;
 import org.apache.hudi.common.model.HoodieRecord;
 import org.apache.hudi.common.model.HoodieTableType;
@@ -27,6 +29,7 @@ import org.apache.hudi.common.testutils.HoodieTestDataGenerator;
 import org.apache.hudi.common.testutils.HoodieTestUtils;
 import org.apache.hudi.common.testutils.RawTripTestPayload;
 import org.apache.hudi.common.testutils.minicluster.HdfsTestService;
+import org.apache.hudi.common.testutils.minicluster.ZookeeperTestService;
 import org.apache.hudi.common.util.CollectionUtils;
 import org.apache.hudi.common.util.Option;
 import org.apache.hudi.exception.HoodieIOException;
@@ -44,6 +47,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.csv.CsvMapper;
 import com.fasterxml.jackson.dataformat.csv.CsvSchema;
 import com.fasterxml.jackson.dataformat.csv.CsvSchema.Builder;
+import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.generic.IndexedRecord;
 import org.apache.hadoop.fs.FileSystem;
@@ -84,10 +88,12 @@ public class UtilitiesTestBase {
   protected static MiniDFSCluster dfsCluster;
   protected static DistributedFileSystem dfs;
   protected transient JavaSparkContext jsc = null;
+  protected transient HoodieSparkEngineContext context = null;
   protected transient SparkSession sparkSession = null;
   protected transient SQLContext sqlContext;
   protected static HiveServer2 hiveServer;
   protected static HiveTestService hiveTestService;
+  protected static ZookeeperTestService zookeeperTestService;
   private static ObjectMapper mapper = new ObjectMapper();
 
   @BeforeAll
@@ -96,11 +102,12 @@ public class UtilitiesTestBase {
     Logger rootLogger = Logger.getRootLogger();
     rootLogger.setLevel(Level.ERROR);
     Logger.getLogger("org.apache.spark").setLevel(Level.WARN);
-    initClass(false);
+    initClass(true);
   }
 
   public static void initClass(boolean startHiveService) throws Exception {
     hdfsTestService = new HdfsTestService();
+    zookeeperTestService = new ZookeeperTestService(hdfsTestService.getHadoopConf());
     dfsCluster = hdfsTestService.start(true);
     dfs = dfsCluster.getFileSystem();
     dfsBasePath = dfs.getWorkingDirectory().toString();
@@ -110,6 +117,7 @@ public class UtilitiesTestBase {
       hiveServer = hiveTestService.start();
       clearHiveDb();
     }
+    zookeeperTestService.start();
   }
 
   @AfterAll
@@ -123,12 +131,16 @@ public class UtilitiesTestBase {
     if (hiveTestService != null) {
       hiveTestService.stop();
     }
+    if (zookeeperTestService != null) {
+      zookeeperTestService.stop();
+    }
   }
 
   @BeforeEach
   public void setup() throws Exception {
     TestDataSource.initDataGen();
     jsc = UtilHelpers.buildSparkContext(this.getClass().getName() + "-hoodie", "local[2]");
+    context = new HoodieSparkEngineContext(jsc);
     sqlContext = new SQLContext(jsc);
     sparkSession = SparkSession.builder().config(jsc.getConf()).getOrCreate();
   }
@@ -138,6 +150,9 @@ public class UtilitiesTestBase {
     TestDataSource.resetDataGen();
     if (jsc != null) {
       jsc.stop();
+    }
+    if (context != null) {
+      context = null;
     }
   }
 
@@ -172,8 +187,11 @@ public class UtilitiesTestBase {
     // Create Dummy hive sync config
     HiveSyncConfig hiveSyncConfig = getHiveSyncConfig("/dummy", "dummy");
     hiveConf.addResource(hiveServer.getHiveConf());
-    HoodieTableMetaClient.initTableType(dfs.getConf(), hiveSyncConfig.basePath, HoodieTableType.COPY_ON_WRITE,
-        hiveSyncConfig.tableName, null);
+    HoodieTableMetaClient.withPropertyBuilder()
+      .setTableType(HoodieTableType.COPY_ON_WRITE)
+      .setTableName(hiveSyncConfig.tableName)
+      .initTable(dfs.getConf(), hiveSyncConfig.basePath);
+
     HoodieHiveClient client = new HoodieHiveClient(hiveSyncConfig, hiveConf, dfs);
     client.updateHiveSQL("drop database if exists " + hiveSyncConfig.databaseName);
     client.updateHiveSQL("create database " + hiveSyncConfig.databaseName);
@@ -272,8 +290,12 @@ public class UtilitiesTestBase {
     }
 
     public static void saveParquetToDFS(List<GenericRecord> records, Path targetFile) throws IOException {
+      saveParquetToDFS(records, targetFile, HoodieTestDataGenerator.AVRO_SCHEMA);
+    }
+
+    public static void saveParquetToDFS(List<GenericRecord> records, Path targetFile, Schema schema) throws IOException {
       try (ParquetWriter<GenericRecord> writer = AvroParquetWriter.<GenericRecord>builder(targetFile)
-          .withSchema(HoodieTestDataGenerator.AVRO_SCHEMA)
+          .withSchema(schema)
           .withConf(HoodieTestUtils.getDefaultHadoopConf())
           .withWriteMode(Mode.OVERWRITE)
           .build()) {
@@ -301,9 +323,9 @@ public class UtilitiesTestBase {
       return props;
     }
 
-    public static GenericRecord toGenericRecord(HoodieRecord hoodieRecord) {
+    public static GenericRecord toGenericRecord(HoodieRecord hoodieRecord, Schema schema) {
       try {
-        Option<IndexedRecord> recordOpt = hoodieRecord.getData().getInsertValue(HoodieTestDataGenerator.AVRO_SCHEMA);
+        Option<IndexedRecord> recordOpt = hoodieRecord.getData().getInsertValue(schema);
         return (GenericRecord) recordOpt.get();
       } catch (IOException e) {
         return null;
@@ -311,9 +333,13 @@ public class UtilitiesTestBase {
     }
 
     public static List<GenericRecord> toGenericRecords(List<HoodieRecord> hoodieRecords) {
+      return toGenericRecords(hoodieRecords, HoodieTestDataGenerator.AVRO_SCHEMA);
+    }
+
+    public static List<GenericRecord> toGenericRecords(List<HoodieRecord> hoodieRecords, Schema schema) {
       List<GenericRecord> records = new ArrayList<>();
       for (HoodieRecord hoodieRecord : hoodieRecords) {
-        records.add(toGenericRecord(hoodieRecord));
+        records.add(toGenericRecord(hoodieRecord, schema));
       }
       return records;
     }

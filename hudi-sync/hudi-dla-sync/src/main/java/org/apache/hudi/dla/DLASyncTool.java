@@ -93,14 +93,16 @@ public class DLASyncTool extends AbstractSyncTool {
           // sync a RO table for MOR
           syncHoodieTable(roTableTableName.get(), false);
           // sync a RT table for MOR
-          syncHoodieTable(snapshotTableName, true);
+          if (!cfg.skipRTSync) {
+            syncHoodieTable(snapshotTableName, true);
+          }
           break;
         default:
           LOG.error("Unknown table type " + hoodieDLAClient.getTableType());
           throw new InvalidTableException(hoodieDLAClient.getBasePath());
       }
     } catch (RuntimeException re) {
-      LOG.error("Got runtime exception when dla syncing", re);
+      throw new HoodieException("Got runtime exception when dla syncing " + cfg.tableName, re);
     } finally {
       hoodieDLAClient.close();
     }
@@ -159,7 +161,7 @@ public class DLASyncTool extends AbstractSyncTool {
     } else {
       // Check if the table schema has evolved
       Map<String, String> tableSchema = hoodieDLAClient.getTableSchema(tableName);
-      SchemaDifference schemaDiff = HiveSchemaUtil.getSchemaDifference(schema, tableSchema, cfg.partitionFields);
+      SchemaDifference schemaDiff = HiveSchemaUtil.getSchemaDifference(schema, tableSchema, cfg.partitionFields, cfg.supportTimestamp);
       if (!schemaDiff.isEmpty()) {
         LOG.info("Schema difference found for " + tableName);
         hoodieDLAClient.updateTableDefinition(tableName, schemaDiff);

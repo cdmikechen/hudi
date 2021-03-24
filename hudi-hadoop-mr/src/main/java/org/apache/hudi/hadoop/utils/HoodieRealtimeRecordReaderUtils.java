@@ -33,6 +33,7 @@ import org.apache.avro.generic.GenericRecord;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.serde2.io.DoubleWritable;
+import org.apache.hadoop.hive.serde2.io.DateWritable;
 import org.apache.hadoop.hive.serde2.io.HiveDecimalWritable;
 import org.apache.hadoop.hive.serde2.typeinfo.DecimalTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.HiveDecimalUtils;
@@ -45,6 +46,8 @@ import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.mapred.JobConf;
+import org.apache.log4j.LogManager;
+import org.apache.log4j.Logger;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -58,6 +61,7 @@ import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 public class HoodieRealtimeRecordReaderUtils {
+  private static final Logger LOG = LogManager.getLogger(HoodieRealtimeRecordReaderUtils.class);
 
   /**
    * Reads the schema from the base file.
@@ -163,6 +167,9 @@ public class HoodieRealtimeRecordReaderUtils {
       case BYTES:
         return new BytesWritable(((ByteBuffer)value).array());
       case INT:
+        if (schema.getLogicalType() != null && schema.getLogicalType().getName().equals("date")) {
+          return new DateWritable((Integer) value);
+        }
         return new IntWritable((Integer) value);
       case LONG:
         return new LongWritable((Long) value);
@@ -246,10 +253,10 @@ public class HoodieRealtimeRecordReaderUtils {
     // /org/apache/hadoop/hive/serde2/ColumnProjectionUtils.java#L188}
     // Field Names -> {@link https://github.com/apache/hive/blob/f37c5de6c32b9395d1b34fa3c02ed06d1bfbf6eb/serde/src/java
     // /org/apache/hadoop/hive/serde2/ColumnProjectionUtils.java#L229}
-    String[] fieldOrdersWithDups = fieldOrderCsv.split(",");
+    String[] fieldOrdersWithDups = fieldOrderCsv.isEmpty() ? new String[0] : fieldOrderCsv.split(",");
     Set<String> fieldOrdersSet = new LinkedHashSet<>(Arrays.asList(fieldOrdersWithDups));
     String[] fieldOrders = fieldOrdersSet.toArray(new String[0]);
-    List<String> fieldNames = Arrays.stream(fieldNameCsv.split(","))
+    List<String> fieldNames = fieldNameCsv.isEmpty() ? new ArrayList<>() : Arrays.stream(fieldNameCsv.split(","))
         .filter(fn -> !partitioningFields.contains(fn)).collect(Collectors.toList());
     Set<String> fieldNamesSet = new LinkedHashSet<>(fieldNames);
     // Hive does not provide ids for partitioning fields, so check for lengths excluding that.

@@ -30,6 +30,9 @@ import org.apache.hudi.integ.testsuite.configuration.DeltaConfig;
 import org.apache.hudi.integ.testsuite.dag.ExecutionContext;
 import org.apache.hudi.integ.testsuite.helpers.HiveServiceProvider;
 
+/**
+ * A hive query node in the DAG of operations for a workflow. used to perform a hive query with given config.
+ */
 public class HiveQueryNode extends DagNode<Boolean> {
 
   private HiveServiceProvider hiveServiceProvider;
@@ -40,7 +43,7 @@ public class HiveQueryNode extends DagNode<Boolean> {
   }
 
   @Override
-  public void execute(ExecutionContext executionContext) throws Exception {
+  public void execute(ExecutionContext executionContext, int curItrCount) throws Exception {
     log.info("Executing hive query node {}", this.getName());
     this.hiveServiceProvider.startLocalHiveServiceIfNeeded(executionContext.getHoodieTestSuiteWriter().getConfiguration());
     HiveSyncConfig hiveSyncConfig = DataSourceUtils

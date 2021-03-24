@@ -29,7 +29,7 @@
   <groupId>org.apache.hudi</groupId>
   <artifactId>hudi</artifactId>
   <packaging>pom</packaging>
-  <version>0.6.1-SNAPSHOT</version>
+  <version>0.9.0-SNAPSHOT</version>
   <description>Apache Hudi brings stream style processing on big data</description>
   <url>https://github.com/apache/hudi</url>
   <name>Hudi</name>
@@ -39,7 +39,7 @@
     <module>hudi-cli</module>
     <module>hudi-client</module>
     <module>hudi-hadoop-mr</module>
-    <module>hudi-spark</module>
+    <module>hudi-spark-datasource</module>
     <module>hudi-timeline-service</module>
     <module>hudi-utilities</module>
     <module>hudi-sync</module>
@@ -53,6 +53,8 @@
     <module>hudi-integ-test</module>
     <module>packaging/hudi-integ-test-bundle</module>
     <module>hudi-examples</module>
+    <module>hudi-flink</module>
+    <module>packaging/hudi-flink-bundle</module>
   </modules>
 
   <licenses>
@@ -82,6 +84,10 @@
 
     <java.version>1.8</java.version>
     <fasterxml.version>2.6.7</fasterxml.version>
+    <fasterxml.jackson.databind.version>2.6.7.3</fasterxml.jackson.databind.version>
+    <fasterxml.jackson.module.scala.version>2.6.7.1</fasterxml.jackson.module.scala.version>
+    <fasterxml.jackson.dataformat.yaml.version>2.7.4</fasterxml.jackson.dataformat.yaml.version>
+    <fasterxml.spark3.version>2.10.0</fasterxml.spark3.version>
     <kafka.version>2.0.0</kafka.version>
     <glassfish.version>2.17</glassfish.version>
     <parquet.version>1.10.1</parquet.version>
@@ -99,9 +105,17 @@
     <metrics.version>4.1.1</metrics.version>
     <prometheus.version>0.8.0</prometheus.version>
     <http.version>4.4.1</http.version>
-    <spark.version>2.4.4</spark.version>
+    <spark.version>${spark2.version}</spark.version>
+    <sparkbundle.version>${spark2bundle.version}</sparkbundle.version>
+    <flink.version>1.11.2</flink.version>
+    <spark2.version>2.4.4</spark2.version>
+    <spark3.version>3.0.0</spark3.version>
+    <spark2bundle.version></spark2bundle.version>
+    <spark3bundle.version>3</spark3bundle.version>
     <avro.version>1.8.2</avro.version>
-    <scala.version>2.11.12</scala.version>
+    <scala11.version>2.11.12</scala11.version>
+    <scala12.version>2.12.10</scala12.version>
+    <scala.version>${scala11.version}</scala.version>
     <scala.binary.version>2.11</scala.binary.version>
     <apache-rat-plugin.version>0.12</apache-rat-plugin.version>
     <scala-maven-plugin.version>3.3.1</scala-maven-plugin.version>
@@ -113,22 +127,26 @@
     <hbase.version>1.2.3</hbase.version>
     <codehaus-jackson.version>1.9.13</codehaus-jackson.version>
     <h2.version>1.4.199</h2.version>
+    <awaitility.version>3.1.2</awaitility.version>
     <skipTests>false</skipTests>
     <skipUTs>${skipTests}</skipUTs>
     <skipFTs>${skipTests}</skipFTs>
     <skipITs>${skipTests}</skipITs>
+    <skip.hudi-spark2.unit.tests>${skipTests}</skip.hudi-spark2.unit.tests>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <main.basedir>${project.basedir}</main.basedir>
     <spark.bundle.hive.scope>provided</spark.bundle.hive.scope>
-    <spark.bundle.hive.shade.prefix></spark.bundle.hive.shade.prefix>
+    <spark.bundle.hive.shade.prefix />
     <spark.bundle.avro.scope>compile</spark.bundle.avro.scope>
     <spark.bundle.spark.shade.prefix>org.apache.hudi.spark.</spark.bundle.spark.shade.prefix>
     <utilities.bundle.hive.scope>provided</utilities.bundle.hive.scope>
-    <utilities.bundle.hive.shade.prefix></utilities.bundle.hive.shade.prefix>
+    <utilities.bundle.hive.shade.prefix />
     <argLine>-Xmx2g</argLine>
     <jacoco.version>0.8.5</jacoco.version>
     <presto.bundle.bootstrap.scope>compile</presto.bundle.bootstrap.scope>
     <presto.bundle.bootstrap.shade.prefix>org.apache.hudi.</presto.bundle.bootstrap.shade.prefix>
+    <shadeSources>true</shadeSources>
+    <zk-curator.version>2.7.1</zk-curator.version>
   </properties>
 
   <scm>
@@ -137,6 +155,32 @@
     <url>git@github.com:apache/hudi.git</url>
     <tag>HEAD</tag>
   </scm>
+
+  <issueManagement>
+    <system>JIRA</system>
+    <url>https://issues.apache.org/jira/browse/HUDI</url>
+  </issueManagement>
+
+  <mailingLists>
+    <mailingList>
+      <name>Dev Mailing List</name>
+      <post>dev@hudi.apache.org</post>
+      <subscribe>dev-subscribe@hudi.apache.org</subscribe>
+      <unsubscribe>dev-unsubscribe@hudi.apache.org</unsubscribe>
+    </mailingList>
+    <mailingList>
+      <name>User Mailing List</name>
+      <post>users@hudi.apache.org</post>
+      <subscribe>users-subscribe@hudi.apache.org</subscribe>
+      <unsubscribe>users-unsubscribe@hudi.apache.org</unsubscribe>
+    </mailingList>
+    <mailingList>
+      <name>Commits Mailing List</name>
+      <post>commits@hudi.apache.org</post>
+      <subscribe>commits-subscribe@hudi.apache.org</subscribe>
+      <unsubscribe>commits-unsubscribe@hudi.apache.org</unsubscribe>
+    </mailingList>
+  </mailingLists>
 
   <build>
     <plugins>
@@ -201,7 +245,7 @@
             </eclipse>
           </java>
           <scala>
-            <trimTrailingWhitespace/>
+            <trimTrailingWhitespace />
           </scala>
         </configuration>
         <executions>
@@ -429,7 +473,7 @@
       <dependency>
         <groupId>com.fasterxml.jackson.core</groupId>
         <artifactId>jackson-databind</artifactId>
-        <version>${fasterxml.version}.3</version>
+        <version>${fasterxml.jackson.databind.version}</version>
       </dependency>
       <dependency>
         <groupId>com.fasterxml.jackson.datatype</groupId>
@@ -439,7 +483,7 @@
       <dependency>
         <groupId>com.fasterxml.jackson.module</groupId>
         <artifactId>jackson-module-scala_${scala.binary.version}</artifactId>
-        <version>${fasterxml.version}.1</version>
+        <version>${fasterxml.jackson.module.scala.version}</version>
       </dependency>
 
       <!-- Glassfish -->
@@ -488,12 +532,53 @@
         <version>${spark.version}</version>
         <scope>provided</scope>
       </dependency>
+      <dependency>
+        <groupId>org.apache.spark</groupId>
+        <artifactId>spark-sql_${scala.binary.version}</artifactId>
+        <classifier>tests</classifier>
+        <version>${spark.version}</version>
+        <scope>test</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.spark</groupId>
+        <artifactId>spark-core_${scala.binary.version}</artifactId>
+        <classifier>tests</classifier>
+        <version>${spark.version}</version>
+        <scope>test</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.spark</groupId>
+        <artifactId>spark-catalyst_${scala.binary.version}</artifactId>
+        <classifier>tests</classifier>
+        <version>${spark.version}</version>
+        <scope>test</scope>
+      </dependency>
 
       <!-- Spark (Packages) -->
       <dependency>
         <groupId>org.apache.spark</groupId>
         <artifactId>spark-avro_${scala.binary.version}</artifactId>
         <version>${spark.version}</version>
+        <scope>provided</scope>
+      </dependency>
+
+      <!-- Flink -->
+      <dependency>
+        <groupId>org.apache.flink</groupId>
+        <artifactId>flink-streaming-java_${scala.binary.version}</artifactId>
+        <version>${flink.version}</version>
+        <scope>provided</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.flink</groupId>
+        <artifactId>flink-clients_${scala.binary.version}</artifactId>
+        <version>${flink.version}</version>
+        <scope>provided</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.flink</groupId>
+        <artifactId>flink-connector-kafka_${scala.binary.version}</artifactId>
+        <version>${flink.version}</version>
         <scope>provided</scope>
       </dependency>
 
@@ -826,6 +911,25 @@
         <scope>test</scope>
       </dependency>
 
+      <!-- Zookeeper -->
+      <dependency>
+        <groupId>org.apache.curator</groupId>
+        <artifactId>curator-framework</artifactId>
+        <version>${zk-curator.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.curator</groupId>
+        <artifactId>curator-client</artifactId>
+        <version>${zk-curator.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.curator</groupId>
+        <artifactId>curator-recipes</artifactId>
+        <version>${zk-curator.version}</version>
+      </dependency>
+
       <dependency>
         <groupId>org.junit.jupiter</groupId>
         <artifactId>junit-jupiter-api</artifactId>
@@ -889,6 +993,15 @@
         <version>4.0.0</version>
         <scope>test</scope>
       </dependency>
+
+      <!-- Other Utils -->
+      <dependency>
+        <groupId>org.awaitility</groupId>
+        <artifactId>awaitility</artifactId>
+        <version>${awaitility.version}</version>
+        <scope>test</scope>
+      </dependency>
+
     </dependencies>
   </dependencyManagement>
   <repositories>
@@ -916,14 +1029,6 @@
     <repository>
       <id>confluent</id>
       <url>https://packages.confluent.io/maven/</url>
-    </repository>
-    <repository>
-      <id>libs-milestone</id>
-      <url>https://repo.spring.io/libs-milestone/</url>
-    </repository>
-    <repository>
-      <id>libs-release</id>
-      <url>https://repo.spring.io/libs-release/</url>
     </repository>
   </repositories>
 
@@ -980,7 +1085,7 @@
                 </goals>
               </execution>
             </executions>
- 	      </plugin>
+          </plugin>
         </plugins>
       </build>
     </profile>
@@ -1168,6 +1273,40 @@
       </build>
     </profile>
     <profile>
+      <id>azp-unit-tests</id>
+      <properties>
+        <skipUTs>false</skipUTs>
+        <skipFTs>true</skipFTs>
+        <skipITs>true</skipITs>
+      </properties>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-surefire-plugin</artifactId>
+            <dependencies>
+              <dependency>
+                <groupId>org.junit.jupiter</groupId>
+                <artifactId>junit-jupiter-engine</artifactId>
+                <version>${junit.jupiter.version}</version>
+              </dependency>
+            </dependencies>
+            <configuration combine.self="append">
+              <skip>${skipUTs}</skip>
+              <forkedProcessExitTimeoutInSeconds>120</forkedProcessExitTimeoutInSeconds>
+              <excludedGroups>functional</excludedGroups>
+              <excludes>
+                <exclude>**/*FunctionalTestSuite.java</exclude>
+                <exclude>**/IT*.java</exclude>
+                <exclude>**/testsuite/**/Test*.java</exclude>
+                <exclude>**/TestPushGateWayReporter.java</exclude>
+              </excludes>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+    <profile>
       <id>javadocs</id>
       <build>
         <plugins>
@@ -1283,7 +1422,7 @@
     <profile>
       <id>scala-2.12</id>
       <properties>
-        <scala.version>2.12.10</scala.version>
+        <scala.version>${scala12.version}</scala.version>
         <scala.binary.version>2.12</scala.binary.version>
       </properties>
       <activation>
@@ -1317,6 +1456,39 @@
           </plugin>
         </plugins>
       </build>
+    </profile>
+
+    <profile>
+      <id>spark3</id>
+      <properties>
+        <spark.version>${spark3.version}</spark.version>
+        <sparkbundle.version>${spark3bundle.version}</sparkbundle.version>
+        <scala.version>${scala12.version}</scala.version>
+        <scala.binary.version>2.12</scala.binary.version>
+        <kafka.version>2.4.1</kafka.version>
+        <fasterxml.version>${fasterxml.spark3.version}</fasterxml.version>
+        <fasterxml.jackson.databind.version>${fasterxml.spark3.version}</fasterxml.jackson.databind.version>
+        <fasterxml.jackson.module.scala.version>${fasterxml.spark3.version}</fasterxml.jackson.module.scala.version>
+        <fasterxml.jackson.dataformat.yaml.version>${fasterxml.spark3.version}</fasterxml.jackson.dataformat.yaml.version>
+        <skip.hudi-spark2.unit.tests>true</skip.hudi-spark2.unit.tests>
+      </properties>
+      <activation>
+        <property>
+          <name>spark3</name>
+        </property>
+      </activation>
+    </profile>
+
+    <profile>
+      <id>skipShadeSources</id>
+      <properties>
+        <shadeSources>false</shadeSources>
+      </properties>
+      <activation>
+        <property>
+          <name>skipShadeSources</name>
+        </property>
+      </activation>
     </profile>
   </profiles>
 

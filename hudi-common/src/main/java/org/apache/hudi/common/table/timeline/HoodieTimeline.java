@@ -48,6 +48,7 @@ public interface HoodieTimeline extends Serializable {
   String CLEAN_ACTION = "clean";
   String ROLLBACK_ACTION = "rollback";
   String SAVEPOINT_ACTION = "savepoint";
+  String REPLACE_COMMIT_ACTION = "replacecommit";
   String INFLIGHT_EXTENSION = ".inflight";
   // With Async Compaction, compaction instant can be in 3 states :
   // (compaction-requested), (compaction-inflight), (completed)
@@ -57,7 +58,7 @@ public interface HoodieTimeline extends Serializable {
 
   String[] VALID_ACTIONS_IN_TIMELINE = {COMMIT_ACTION, DELTA_COMMIT_ACTION,
       CLEAN_ACTION, SAVEPOINT_ACTION, RESTORE_ACTION, ROLLBACK_ACTION,
-      COMPACTION_ACTION};
+      COMPACTION_ACTION, REPLACE_COMMIT_ACTION};
 
   String COMMIT_EXTENSION = "." + COMMIT_ACTION;
   String DELTA_COMMIT_EXTENSION = "." + DELTA_COMMIT_ACTION;
@@ -78,6 +79,9 @@ public interface HoodieTimeline extends Serializable {
   String INFLIGHT_COMPACTION_EXTENSION = StringUtils.join(".", COMPACTION_ACTION, INFLIGHT_EXTENSION);
   String INFLIGHT_RESTORE_EXTENSION = "." + RESTORE_ACTION + INFLIGHT_EXTENSION;
   String RESTORE_EXTENSION = "." + RESTORE_ACTION;
+  String INFLIGHT_REPLACE_COMMIT_EXTENSION = "." + REPLACE_COMMIT_ACTION + INFLIGHT_EXTENSION;
+  String REQUESTED_REPLACE_COMMIT_EXTENSION = "." + REPLACE_COMMIT_ACTION + REQUESTED_EXTENSION;
+  String REPLACE_COMMIT_EXTENSION = "." + REPLACE_COMMIT_ACTION;
 
   String INVALID_INSTANT_TS = "0";
 
@@ -105,7 +109,7 @@ public interface HoodieTimeline extends Serializable {
   /**
    * Filter this timeline to just include the in-flights excluding compaction instants.
    *
-   * @return New instance of HoodieTimeline with just in-flights excluding compaction inflights
+   * @return New instance of HoodieTimeline with just in-flights excluding compaction instants
    */
   HoodieTimeline filterPendingExcludingCompaction();
 
@@ -127,11 +131,18 @@ public interface HoodieTimeline extends Serializable {
   HoodieTimeline filterCompletedAndCompactionInstants();
 
   /**
-   * Timeline to just include commits (commit/deltacommit) and compaction actions.
+   * Timeline to just include commits (commit/deltacommit), compaction and replace actions.
    * 
    * @return
    */
-  HoodieTimeline getCommitsAndCompactionTimeline();
+  HoodieTimeline getWriteTimeline();
+
+  /**
+   * Timeline to just include replace instants that have valid (commit/deltacommit) actions.
+   *
+   * @return
+   */
+  HoodieTimeline getCompletedReplaceTimeline();
 
   /**
    * Filter this timeline to just include requested and inflight compaction instants.
@@ -139,6 +150,11 @@ public interface HoodieTimeline extends Serializable {
    * @return
    */
   HoodieTimeline filterPendingCompactionTimeline();
+
+  /**
+   * Filter this timeline to just include requested and inflight replacecommit instants.
+   */
+  HoodieTimeline filterPendingReplaceTimeline();
 
   /**
    * Create a new Timeline with all the instants after startTs.
@@ -156,10 +172,20 @@ public interface HoodieTimeline extends Serializable {
   HoodieTimeline findInstantsAfter(String instantTime, int numCommits);
 
   /**
+   * Create a new Timeline with all the instants after startTs.
+   */
+  HoodieTimeline findInstantsAfter(String instantTime);
+
+  /**
    * Create a new Timeline with all instants before specified time.
    */
   HoodieTimeline findInstantsBefore(String instantTime);
 
+  /**
+   * Create new timeline with all instants before or equals specified time.
+   */
+  HoodieTimeline findInstantsBeforeOrEquals(String instantTime);
+  
   /**
    * Custom Filter of Instants.
    */
@@ -209,6 +235,11 @@ public interface HoodieTimeline extends Serializable {
    * @return true if the passed instant is present as a completed instant on the timeline
    */
   boolean containsInstant(HoodieInstant instant);
+
+  /**
+   * @return true if the passed instant is present as a completed instant on the timeline
+   */
+  boolean containsInstant(String ts);
 
   /**
    * @return true if the passed instant is present as a completed instant on the timeline or if the instant is before
@@ -280,6 +311,14 @@ public interface HoodieTimeline extends Serializable {
 
   static HoodieInstant getCompactionInflightInstant(final String timestamp) {
     return new HoodieInstant(State.INFLIGHT, COMPACTION_ACTION, timestamp);
+  }
+
+  static HoodieInstant getReplaceCommitRequestedInstant(final String timestamp) {
+    return new HoodieInstant(State.REQUESTED, REPLACE_COMMIT_ACTION, timestamp);
+  }
+
+  static HoodieInstant getReplaceCommitInflightInstant(final String timestamp) {
+    return new HoodieInstant(State.INFLIGHT, REPLACE_COMMIT_ACTION, timestamp);
   }
 
   /**
@@ -358,6 +397,18 @@ public interface HoodieTimeline extends Serializable {
 
   static String makeInflightRestoreFileName(String instant) {
     return StringUtils.join(instant, HoodieTimeline.INFLIGHT_RESTORE_EXTENSION);
+  }
+
+  static String makeReplaceFileName(String instant) {
+    return StringUtils.join(instant, HoodieTimeline.REPLACE_COMMIT_EXTENSION);
+  }
+
+  static String makeInflightReplaceFileName(String instant) {
+    return StringUtils.join(instant, HoodieTimeline.INFLIGHT_REPLACE_COMMIT_EXTENSION);
+  }
+
+  static String makeRequestedReplaceFileName(String instant) {
+    return StringUtils.join(instant, HoodieTimeline.REQUESTED_REPLACE_COMMIT_EXTENSION);
   }
 
   static String makeDeltaFileName(String instantTime) {

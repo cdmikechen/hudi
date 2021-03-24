@@ -34,6 +34,7 @@ Hudi manages the storage of large analytical datasets on DFS (Cloud stores, HDFS
 * Manages file sizes, layout using statistics
 * Async compaction of row & columnar data
 * Timeline metadata to track lineage
+* Optimize data lake layout with clustering
  
 Hudi supports three types of queries:
  * **Snapshot Query** - Provides snapshot queries on real-time data, using a combination of columnar & row-based storage (e.g [Parquet](https://parquet.apache.org/) + [Avro](https://avro.apache.org/docs/current/mr.html)).
@@ -74,6 +75,14 @@ The default Scala version supported is 2.11. To build for Scala 2.12 version, bu
 
 ```
 mvn clean package -DskipTests -Dscala-2.12
+```
+
+### Build with Spark 3.0.0
+
+The default Spark version supported is 2.4.4. To build for Spark 3.0.0 version, build using `spark3` profile
+
+```
+mvn clean package -DskipTests -Dspark3
 ```
 
 ### Build without spark-avro module

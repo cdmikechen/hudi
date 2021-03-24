@@ -148,7 +148,11 @@ public class HiveTestService {
     hadoopConf = null;
   }
 
-  private HiveConf configureHive(Configuration conf, String localHiveLocation) throws IOException {
+  public HiveServer2 getHiveServer() {
+    return hiveServer;
+  }
+
+  public HiveConf configureHive(Configuration conf, String localHiveLocation) throws IOException {
     conf.set("hive.metastore.local", "false");
     conf.set(HiveConf.ConfVars.METASTOREURIS.varname, "thrift://" + bindIP + ":" + metastorePort);
     conf.set(HiveConf.ConfVars.HIVE_SERVER2_THRIFT_BIND_HOST.varname, bindIP);
@@ -171,6 +175,8 @@ public class HiveTestService {
         Files.createTempDirectory(System.currentTimeMillis() + "-").toFile().getAbsolutePath());
     conf.set("datanucleus.schema.autoCreateTables", "true");
     conf.set("hive.metastore.schema.verification", "false");
+    conf.set("datanucleus.autoCreateSchema", "true");
+    conf.set("datanucleus.fixedDatastore", "false");
     setSystemProperty("derby.stream.error.file", derbyLogFile.getPath());
 
     return new HiveConf(conf, this.getClass());

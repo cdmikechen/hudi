@@ -55,7 +55,7 @@ public class HoodieExampleDataGenerator<T extends HoodieRecordPayload<T>> {
   public static final String[] DEFAULT_PARTITION_PATHS =
       {DEFAULT_FIRST_PARTITION_PATH, DEFAULT_SECOND_PARTITION_PATH, DEFAULT_THIRD_PARTITION_PATH};
   public static String TRIP_EXAMPLE_SCHEMA = "{\"type\": \"record\",\"name\": \"triprec\",\"fields\": [ "
-          + "{\"name\": \"ts\",\"type\": \"double\"},{\"name\": \"uuid\", \"type\": \"string\"},"
+          + "{\"name\": \"ts\",\"type\": \"long\"},{\"name\": \"uuid\", \"type\": \"string\"},"
           + "{\"name\": \"rider\", \"type\": \"string\"},{\"name\": \"driver\", \"type\": \"string\"},"
           + "{\"name\": \"begin_lat\", \"type\": \"double\"},{\"name\": \"begin_lon\", \"type\": \"double\"},"
           + "{\"name\": \"end_lat\", \"type\": \"double\"},{\"name\": \"end_lon\", \"type\": \"double\"},"
@@ -86,12 +86,12 @@ public class HoodieExampleDataGenerator<T extends HoodieRecordPayload<T>> {
    */
   @SuppressWarnings("unchecked")
   public T generateRandomValue(HoodieKey key, String commitTime) {
-    GenericRecord rec = generateGenericRecord(key.getRecordKey(), "rider-" + commitTime, "driver-" + commitTime, 0.0);
+    GenericRecord rec = generateGenericRecord(key.getRecordKey(), "rider-" + commitTime, "driver-" + commitTime, 0);
     return (T) new HoodieAvroPayload(Option.of(rec));
   }
 
   public GenericRecord generateGenericRecord(String rowKey, String riderName, String driverName,
-                                             double timestamp) {
+                                             long timestamp) {
     GenericRecord rec = new GenericData.Record(avroSchema);
     rec.put("uuid", rowKey);
     rec.put("ts", timestamp);

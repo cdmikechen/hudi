@@ -23,6 +23,8 @@ import org.apache.hudi.common.util.CollectionUtils;
 import org.apache.hudi.common.util.collection.Pair;
 
 import org.apache.hudi.keygen.SimpleKeyGenerator;
+
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -77,7 +79,7 @@ public class ITTestHoodieDemo extends ITTestBase {
   private static final String HIVE_INCREMENTAL_MOR_RO_COMMANDS = HOODIE_WS_ROOT + "/docker/demo/hive-incremental-mor-ro.commands";
   private static final String HIVE_INCREMENTAL_MOR_RT_COMMANDS = HOODIE_WS_ROOT + "/docker/demo/hive-incremental-mor-rt.commands";
 
-  private static HoodieFileFormat baseFileFormat;
+  private HoodieFileFormat baseFileFormat;
 
   private static String HIVE_SYNC_CMD_FMT =
       " --enable-hive-sync --hoodie-conf hoodie.datasource.hive_sync.jdbcurl=jdbc:hive2://hiveserver:10000 "
@@ -113,6 +115,36 @@ public class ITTestHoodieDemo extends ITTestBase {
     testHiveAfterSecondBatchAfterCompaction();
     testPrestoAfterSecondBatchAfterCompaction();
     testIncrementalHiveQueryAfterCompaction();
+  }
+
+  @Test
+  @Disabled
+  public void testHFileDemo() throws Exception {
+    baseFileFormat = HoodieFileFormat.HFILE;
+
+    // TODO: Preseto and SparkSQL support for HFile format
+
+    setupDemo();
+
+    // batch 1
+    ingestFirstBatchAndHiveSync();
+    testHiveAfterFirstBatch();
+    //testPrestoAfterFirstBatch();
+    //testSparkSQLAfterFirstBatch();
+
+    // batch 2
+    ingestSecondBatchAndHiveSync();
+    testHiveAfterSecondBatch();
+    //testPrestoAfterSecondBatch();
+    //testSparkSQLAfterSecondBatch();
+    testIncrementalHiveQueryBeforeCompaction();
+    //testIncrementalSparkSQLQuery();
+
+    // compaction
+    scheduleAndRunCompaction();
+    testHiveAfterSecondBatchAfterCompaction();
+    //testPrestoAfterSecondBatchAfterCompaction();
+    //testIncrementalHiveQueryAfterCompaction();
   }
 
   private void setupDemo() throws Exception {
@@ -177,7 +209,6 @@ public class ITTestHoodieDemo extends ITTestBase {
         + " --initial-checkpoint-provider"
         + " org.apache.hudi.utilities.checkpointing.InitialCheckpointFromAnotherHoodieTimelineProvider"
         + " --hoodie-conf hoodie.bootstrap.base.path=" + BOOTSTRAPPED_SRC_PATH
-        + " --hoodie-conf hoodie.bootstrap.recordkey.columns=key"
         + " --hoodie-conf hoodie.deltastreamer.checkpoint.provider.path=" + COW_BASE_PATH
         + " --hoodie-conf hoodie.bootstrap.parallelism=2 "
         + " --hoodie-conf hoodie.bootstrap.keygen.class=" + SimpleKeyGenerator.class.getName()
@@ -192,7 +223,6 @@ public class ITTestHoodieDemo extends ITTestBase {
         + " --initial-checkpoint-provider"
         + " org.apache.hudi.utilities.checkpointing.InitialCheckpointFromAnotherHoodieTimelineProvider"
         + " --hoodie-conf hoodie.bootstrap.base.path=" + BOOTSTRAPPED_SRC_PATH
-        + " --hoodie-conf hoodie.bootstrap.recordkey.columns=key"
         + " --hoodie-conf hoodie.deltastreamer.checkpoint.provider.path=" + COW_BASE_PATH
         + " --hoodie-conf hoodie.bootstrap.parallelism=2 "
         + " --hoodie-conf hoodie.bootstrap.keygen.class=" + SimpleKeyGenerator.class.getName()

@@ -152,7 +152,18 @@ public class TableSchemaResolver {
    * @throws Exception
    */
   public Schema getTableAvroSchema() throws Exception {
-    Option<Schema> schemaFromCommitMetadata = getTableSchemaFromCommitMetadata(true);
+    return getTableAvroSchema(true);
+  }
+
+  /**
+   * Gets schema for a hoodie table in Avro format, can choice if include metadata fields.
+   *
+   * @param includeMetadataFields choice if include metadata fields
+   * @return Avro schema for this table
+   * @throws Exception
+   */
+  public Schema getTableAvroSchema(boolean includeMetadataFields) throws Exception {
+    Option<Schema> schemaFromCommitMetadata = getTableSchemaFromCommitMetadata(includeMetadataFields);
     return schemaFromCommitMetadata.isPresent() ? schemaFromCommitMetadata.get() : getTableAvroSchemaFromDataFile();
   }
 
@@ -175,9 +186,23 @@ public class TableSchemaResolver {
    * @throws Exception
    */
   public Schema getTableAvroSchemaWithoutMetadataFields() throws Exception {
-    Option<Schema> schemaFromCommitMetadata = getTableSchemaFromCommitMetadata(false);
+    HoodieTimeline timeline = metaClient.getActiveTimeline().getCommitsTimeline().filterCompletedInstants();
+    Option<Schema> schemaFromCommitMetadata = getTableSchemaFromCommitMetadata(timeline.lastInstant().get(), false);
     return schemaFromCommitMetadata.isPresent() ? schemaFromCommitMetadata.get() :
            HoodieAvroUtils.removeMetadataFields(getTableAvroSchemaFromDataFile());
+  }
+
+  /**
+   * Gets users data schema for a hoodie table in Avro format of the instant.
+   *
+   * @param instant will get the instant data schema
+   * @return  Avro user data schema
+   * @throws Exception
+   */
+  public Schema getTableAvroSchemaWithoutMetadataFields(HoodieInstant instant) throws Exception {
+    Option<Schema> schemaFromCommitMetadata = getTableSchemaFromCommitMetadata(instant, false);
+    return schemaFromCommitMetadata.isPresent() ? schemaFromCommitMetadata.get() :
+        HoodieAvroUtils.removeMetadataFields(getTableAvroSchemaFromDataFile());
   }
 
   /**
@@ -186,9 +211,20 @@ public class TableSchemaResolver {
    * @return Avro schema for this table
    */
   private Option<Schema> getTableSchemaFromCommitMetadata(boolean includeMetadataFields) {
+    HoodieTimeline timeline = metaClient.getActiveTimeline().getCommitsTimeline().filterCompletedInstants();
+    return getTableSchemaFromCommitMetadata(timeline.lastInstant().get(), includeMetadataFields);
+  }
+
+
+  /**
+   * Gets the schema for a hoodie table in Avro format from the HoodieCommitMetadata of the instant.
+   *
+   * @return Avro schema for this table
+   */
+  private Option<Schema> getTableSchemaFromCommitMetadata(HoodieInstant instant, boolean includeMetadataFields) {
     try {
       HoodieTimeline timeline = metaClient.getActiveTimeline().getCommitsTimeline().filterCompletedInstants();
-      byte[] data = timeline.getInstantDetails(timeline.lastInstant().get()).get();
+      byte[] data = timeline.getInstantDetails(instant).get();
       HoodieCommitMetadata metadata = HoodieCommitMetadata.fromBytes(data, HoodieCommitMetadata.class);
       String existingSchemaStr = metadata.getMetadata(HoodieCommitMetadata.SCHEMA_KEY);
 
@@ -271,7 +307,7 @@ public class TableSchemaResolver {
   public static boolean isSchemaCompatible(Schema oldSchema, Schema newSchema) {
     if (oldSchema.getType() == newSchema.getType() && newSchema.getType() == Schema.Type.RECORD) {
       // record names must match:
-      if (!SchemaCompatibility.schemaNameEquals(oldSchema, newSchema)) {
+      if (!SchemaCompatibility.schemaNameEquals(newSchema, oldSchema)) {
         return false;
       }
 
@@ -304,9 +340,11 @@ public class TableSchemaResolver {
       // All fields in the newSchema record can be populated from the oldSchema record
       return true;
     } else {
-      // Use the checks implemented by
+      // Use the checks implemented by Avro
+      // newSchema is the schema which will be used to read the records written earlier using oldSchema. Hence, in the
+      // check below, use newSchema as the reader schema and oldSchema as the writer schema.
       org.apache.avro.SchemaCompatibility.SchemaPairCompatibility compatResult =
-          org.apache.avro.SchemaCompatibility.checkReaderWriterCompatibility(oldSchema, newSchema);
+          org.apache.avro.SchemaCompatibility.checkReaderWriterCompatibility(newSchema, oldSchema);
       return compatResult.getType() == org.apache.avro.SchemaCompatibility.SchemaCompatibilityType.COMPATIBLE;
     }
   }

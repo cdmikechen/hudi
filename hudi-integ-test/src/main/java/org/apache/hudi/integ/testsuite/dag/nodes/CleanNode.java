@@ -18,15 +18,21 @@
 
 package org.apache.hudi.integ.testsuite.dag.nodes;
 
+import org.apache.hudi.integ.testsuite.configuration.DeltaConfig.Config;
 import org.apache.hudi.integ.testsuite.dag.ExecutionContext;
 
+/**
+ * Represents a clean node in the DAG of operations for a workflow. Clean up any stale/old files/data lying around
+ * (either on file storage or index storage) based on configurations and CleaningPolicy used.
+ */
 public class CleanNode extends DagNode<Boolean> {
 
-  public CleanNode() {
+  public CleanNode(Config config) {
+    this.config = config;
   }
 
   @Override
-  public void execute(ExecutionContext executionContext) throws Exception {
+  public void execute(ExecutionContext executionContext, int curItrCount) throws Exception {
     log.info("Executing clean node {}", this.getName());
     executionContext.getHoodieTestSuiteWriter().getWriteClient(this).clean();
   }

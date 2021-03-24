@@ -18,42 +18,52 @@
 
 package org.apache.hudi.integ.testsuite;
 
-import com.beust.jcommander.JCommander;
-import com.beust.jcommander.Parameter;
-import java.io.IOException;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.avro.Schema;
 import org.apache.hudi.DataSourceUtils;
-import org.apache.hudi.common.config.SerializableConfiguration;
 import org.apache.hudi.common.config.TypedProperties;
 import org.apache.hudi.common.fs.FSUtils;
-import org.apache.hudi.common.model.HoodieTableType;
+import org.apache.hudi.common.model.HoodieCommitMetadata;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
+import org.apache.hudi.common.table.timeline.HoodieActiveTimeline;
+import org.apache.hudi.common.table.timeline.HoodieInstant;
+import org.apache.hudi.common.table.timeline.HoodieTimeline;
 import org.apache.hudi.common.util.ReflectionUtils;
 import org.apache.hudi.exception.HoodieException;
-import org.apache.hudi.integ.testsuite.configuration.DFSDeltaConfig;
+import org.apache.hudi.integ.testsuite.configuration.DeltaConfig.Config;
 import org.apache.hudi.integ.testsuite.dag.DagUtils;
 import org.apache.hudi.integ.testsuite.dag.WorkflowDag;
 import org.apache.hudi.integ.testsuite.dag.WorkflowDagGenerator;
+import org.apache.hudi.integ.testsuite.dag.WriterContext;
+import org.apache.hudi.integ.testsuite.dag.nodes.DagNode;
+import org.apache.hudi.integ.testsuite.dag.nodes.RollbackNode;
 import org.apache.hudi.integ.testsuite.dag.scheduler.DagScheduler;
-import org.apache.hudi.integ.testsuite.generator.DeltaGenerator;
+import org.apache.hudi.integ.testsuite.dag.scheduler.SaferSchemaDagScheduler;
+import org.apache.hudi.integ.testsuite.helpers.HiveServiceProvider;
+import org.apache.hudi.integ.testsuite.helpers.ZookeeperServiceProvider;
 import org.apache.hudi.integ.testsuite.reader.DeltaInputType;
 import org.apache.hudi.integ.testsuite.writer.DeltaOutputMode;
 import org.apache.hudi.keygen.BuiltinKeyGenerator;
 import org.apache.hudi.utilities.UtilHelpers;
 import org.apache.hudi.utilities.deltastreamer.HoodieDeltaStreamer;
-import org.apache.hudi.utilities.schema.SchemaProvider;
+
+import com.beust.jcommander.JCommander;
+import com.beust.jcommander.Parameter;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.sql.SparkSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+
 /**
- * This is the entry point for running a Hudi Test Suite. Although this class has similarities with
- * {@link HoodieDeltaStreamer} this class does not extend it since do not want to create a dependency on the changes in
- * DeltaStreamer.
+ * This is the entry point for running a Hudi Test Suite. Although this class has similarities with {@link HoodieDeltaStreamer} this class does not extend it since do not want to create a dependency
+ * on the changes in DeltaStreamer.
  */
 public class HoodieTestSuiteJob {
 
@@ -64,10 +74,6 @@ public class HoodieTestSuiteJob {
    * Bag of properties with source, hoodie client, key generator etc.
    */
   TypedProperties props;
-  /**
-   * Schema provider that supplies the command for writing out the generated payloads.
-   */
-  private transient SchemaProvider schemaProvider;
   /**
    * Filesystem used.
    */
@@ -86,22 +92,61 @@ public class HoodieTestSuiteJob {
   private transient HiveConf hiveConf;
 
   private BuiltinKeyGenerator keyGenerator;
+  private transient HoodieTableMetaClient metaClient;
 
   public HoodieTestSuiteJob(HoodieTestSuiteConfig cfg, JavaSparkContext jsc) throws IOException {
+    log.warn("Running spark job w/ app id " + jsc.sc().applicationId());
     this.cfg = cfg;
     this.jsc = jsc;
+    cfg.propsFilePath = FSUtils.addSchemeIfLocalPath(cfg.propsFilePath).toString();
     this.sparkSession = SparkSession.builder().config(jsc.getConf()).getOrCreate();
     this.fs = FSUtils.getFs(cfg.inputBasePath, jsc.hadoopConfiguration());
     this.props = UtilHelpers.readConfig(fs, new Path(cfg.propsFilePath), cfg.configs).getConfig();
     log.info("Creating workload generator with configs : {}", props.toString());
-    this.schemaProvider = UtilHelpers.createSchemaProvider(cfg.schemaProviderClassName, props, jsc);
     this.hiveConf = getDefaultHiveConf(jsc.hadoopConfiguration());
     this.keyGenerator = (BuiltinKeyGenerator) DataSourceUtils.createKeyGenerator(props);
 
-    if (!fs.exists(new Path(cfg.targetBasePath))) {
-      HoodieTableMetaClient.initTableType(jsc.hadoopConfiguration(), cfg.targetBasePath,
-          HoodieTableType.valueOf(cfg.tableType), cfg.targetTableName, "archived");
+    metaClient = HoodieTableMetaClient.withPropertyBuilder()
+        .setTableType(cfg.tableType)
+        .setTableName(cfg.targetTableName)
+        .setArchiveLogFolder("archived")
+        .initTable(jsc.hadoopConfiguration(), cfg.targetBasePath);
+
+    if (cfg.cleanInput) {
+      Path inputPath = new Path(cfg.inputBasePath);
+      if (fs.exists(inputPath)) {
+        fs.delete(inputPath, true);
+      }
     }
+
+    if (cfg.cleanOutput) {
+      Path outputPath = new Path(cfg.targetBasePath);
+      if (fs.exists(outputPath)) {
+        fs.delete(outputPath, true);
+      }
+    }
+  }
+
+  int getSchemaVersionFromCommit(int nthCommit) throws Exception {
+    int version = 0;
+    try {
+      HoodieTimeline timeline = new HoodieActiveTimeline(metaClient).getCommitsTimeline();
+      // Pickup the schema version from nth commit from last (most recent insert/upsert will be rolled back).
+      HoodieInstant prevInstant = timeline.nthFromLastInstant(nthCommit).get();
+      HoodieCommitMetadata commit = HoodieCommitMetadata.fromBytes(timeline.getInstantDetails(prevInstant).get(),
+          HoodieCommitMetadata.class);
+      Map<String, String> extraMetadata = commit.getExtraMetadata();
+      String avroSchemaStr = extraMetadata.get(HoodieCommitMetadata.SCHEMA_KEY);
+      Schema avroSchema = new Schema.Parser().parse(avroSchemaStr);
+      version = Integer.parseInt(avroSchema.getObjectProp("schemaVersion").toString());
+      // DAG will generate & ingest data for 2 versions (n-th version being validated, n-1).
+      log.info(String.format("Last used schemaVersion from latest commit file was %d. Optimizing the DAG.", version));
+    } catch (Exception e) {
+      // failed to open the commit to read schema version.
+      // continue executing the DAG without any changes.
+      log.info("Last used schemaVersion could not be validated from commit file.  Skipping SaferSchema Optimization.");
+    }
+    return version;
   }
 
   private static HiveConf getDefaultHiveConf(Configuration cfg) {
@@ -123,27 +168,68 @@ public class HoodieTestSuiteJob {
     new HoodieTestSuiteJob(cfg, jssc).runTestSuite();
   }
 
+  public WorkflowDag createWorkflowDag() throws IOException {
+    WorkflowDag workflowDag = this.cfg.workloadYamlPath == null ? ((WorkflowDagGenerator) ReflectionUtils
+        .loadClass((this.cfg).workloadDagGenerator)).build()
+        : DagUtils.convertYamlPathToDag(
+            FSUtils.getFs(this.cfg.workloadYamlPath, jsc.hadoopConfiguration(), true),
+            this.cfg.workloadYamlPath);
+    return workflowDag;
+  }
+
   public void runTestSuite() {
     try {
-      WorkflowDag workflowDag = this.cfg.workloadYamlPath == null ? ((WorkflowDagGenerator) ReflectionUtils
-          .loadClass((this.cfg).workloadDagGenerator)).build()
-          : DagUtils.convertYamlPathToDag(this.fs, this.cfg.workloadYamlPath);
+      WorkflowDag workflowDag = createWorkflowDag();
       log.info("Workflow Dag => " + DagUtils.convertDagToYaml(workflowDag));
       long startTime = System.currentTimeMillis();
-      String schemaStr = schemaProvider.getSourceSchema().toString();
-      final HoodieTestSuiteWriter writer = new HoodieTestSuiteWriter(jsc, props, cfg, schemaStr);
-      final DeltaGenerator deltaGenerator = new DeltaGenerator(
-          new DFSDeltaConfig(DeltaOutputMode.valueOf(cfg.outputTypeName), DeltaInputType.valueOf(cfg.inputFormatName),
-              new SerializableConfiguration(jsc.hadoopConfiguration()), cfg.inputBasePath, cfg.targetBasePath,
-              schemaStr, cfg.limitFileSize), jsc, sparkSession, schemaStr, keyGenerator);
-      DagScheduler dagScheduler = new DagScheduler(workflowDag, writer, deltaGenerator);
-      dagScheduler.schedule();
+      WriterContext writerContext = new WriterContext(jsc, props, cfg, keyGenerator, sparkSession);
+      writerContext.initContext(jsc);
+      startOtherServicesIfNeeded(writerContext);
+      if (this.cfg.saferSchemaEvolution) {
+        int numRollbacks = 2; // rollback most recent upsert/insert, by default.
+        // if root is RollbackNode, get num_rollbacks
+        List<DagNode> root = workflowDag.getNodeList();
+        if (!root.isEmpty() && root.get(0) instanceof RollbackNode) {
+          numRollbacks = root.get(0).getConfig().getNumRollbacks();
+        }
+
+        int version = getSchemaVersionFromCommit(numRollbacks - 1);
+        SaferSchemaDagScheduler dagScheduler = new SaferSchemaDagScheduler(workflowDag, writerContext, jsc, version);
+        dagScheduler.schedule();
+      } else {
+        DagScheduler dagScheduler = new DagScheduler(workflowDag, writerContext, jsc);
+        dagScheduler.schedule();
+      }
       log.info("Finished scheduling all tasks, Time taken {}", System.currentTimeMillis() - startTime);
     } catch (Exception e) {
       log.error("Failed to run Test Suite ", e);
       throw new HoodieException("Failed to run Test Suite ", e);
     } finally {
+      stopQuietly();
+    }
+  }
+
+  private void stopQuietly() {
+    try {
+      sparkSession.stop();
       jsc.stop();
+    } catch (Exception e) {
+      log.error("Unable to stop spark session", e);
+    }
+  }
+
+  private void startOtherServicesIfNeeded(WriterContext writerContext) throws Exception {
+    if (cfg.startHiveMetastore) {
+      HiveServiceProvider hiveServiceProvider = new HiveServiceProvider(
+          Config.newBuilder().withHiveLocal(true).build());
+      hiveServiceProvider.startLocalHiveServiceIfNeeded(writerContext.getHoodieTestSuiteWriter().getConfiguration());
+      hiveServiceProvider.syncToLocalHiveIfNeeded(writerContext.getHoodieTestSuiteWriter());
+    }
+
+    if (cfg.startZookeeper) {
+      ZookeeperServiceProvider zookeeperServiceProvider = new ZookeeperServiceProvider(Config.newBuilder().withHiveLocal(true).build(),
+          writerContext.getHoodieTestSuiteWriter().getConfiguration());
+      zookeeperServiceProvider.startLocalZookeeperIfNeeded();
     }
   }
 
@@ -158,8 +244,7 @@ public class HoodieTestSuiteJob {
     public String inputBasePath;
 
     @Parameter(names = {
-        "--workload-generator-classname"}, description = "WorkflowDag of operations to generate the workload",
-        required = true)
+        "--workload-generator-classname"}, description = "WorkflowDag of operations to generate the workload")
     public String workloadDagGenerator = WorkflowDagGenerator.class.getName();
 
     @Parameter(names = {
@@ -178,10 +263,35 @@ public class HoodieTestSuiteJob {
         required = true)
     public Long limitFileSize = 1024 * 1024 * 120L;
 
+    @Parameter(names = {"--input-parallelism"}, description = "Parallelism to use when generation input files",
+        required = false)
+    public Integer inputParallelism = 0;
+
+    @Parameter(names = {"--delete-old-input"}, description = "Delete older input files once they have been ingested",
+        required = false)
+    public Boolean deleteOldInput = false;
+
     @Parameter(names = {"--use-deltastreamer"}, description = "Choose whether to use HoodieDeltaStreamer to "
-        + "perform"
-        + " ingestion. If set to false, HoodieWriteClient will be used")
+        + "perform ingestion. If set to false, HoodieWriteClient will be used")
     public Boolean useDeltaStreamer = false;
 
+    @Parameter(names = {"--clean-input"}, description = "Clean the input folders and delete all files within it "
+        + "before starting the Job")
+    public Boolean cleanInput = false;
+
+    @Parameter(names = {"--clean-output"}, description = "Clean the output folders and delete all files within it "
+        + "before starting the Job")
+    public Boolean cleanOutput = false;
+
+    @Parameter(names = {"--saferSchemaEvolution"}, description = "Optimize the DAG for safer schema evolution."
+        + "(If not provided, assumed to be false.)",
+        required = false)
+    public Boolean saferSchemaEvolution = false;
+
+    @Parameter(names = {"--start-zookeeper"}, description = "Start Zookeeper instance to use for optimistic lock ")
+    public Boolean startZookeeper = false;
+
+    @Parameter(names = {"--start-hive-metastore"}, description = "Start Hive Metastore to use for optimistic lock ")
+    public Boolean startHiveMetastore = false;
   }
 }

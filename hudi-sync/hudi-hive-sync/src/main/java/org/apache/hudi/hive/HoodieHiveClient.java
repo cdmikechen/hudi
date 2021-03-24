@@ -18,6 +18,14 @@
 
 package org.apache.hudi.hive;
 
+import java.io.UnsupportedEncodingException;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import org.apache.hadoop.hive.metastore.api.FieldSchema;
+import org.apache.hadoop.hive.metastore.api.MetaException;
+import org.apache.hadoop.hive.metastore.api.Partition;
+import org.apache.hadoop.hive.metastore.api.Table;
+import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hudi.common.fs.FSUtils;
 import org.apache.hudi.common.fs.StorageSchemes;
 import org.apache.hudi.common.table.timeline.HoodieTimeline;
@@ -29,15 +37,10 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
-import org.apache.hadoop.hive.metastore.api.FieldSchema;
-import org.apache.hadoop.hive.metastore.api.MetaException;
-import org.apache.hadoop.hive.metastore.api.Partition;
-import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.ql.metadata.Hive;
 import org.apache.hadoop.hive.ql.metadata.HiveException;
 import org.apache.hadoop.hive.ql.processors.CommandProcessorResponse;
 import org.apache.hadoop.hive.ql.session.SessionState;
-import org.apache.hive.jdbc.HiveDriver;
 import org.apache.hudi.sync.common.AbstractSyncHoodieClient;
 import org.apache.log4j.LogManager;
 import org.apache.log4j.Logger;
@@ -61,17 +64,7 @@ import java.util.stream.Collectors;
 public class HoodieHiveClient extends AbstractSyncHoodieClient {
 
   private static final String HOODIE_LAST_COMMIT_TIME_SYNC = "last_commit_time_sync";
-  // Make sure we have the hive JDBC driver in classpath
-  private static String driverName = HiveDriver.class.getName();
   private static final String HIVE_ESCAPE_CHARACTER = HiveSchemaUtil.HIVE_ESCAPE_CHARACTER;
-
-  static {
-    try {
-      Class.forName(driverName);
-    } catch (ClassNotFoundException e) {
-      throw new IllegalStateException("Could not find " + driverName + " in classpath. ", e);
-    }
-  }
 
   private static final Logger LOG = LogManager.getLogger(HoodieHiveClient.class);
   private final PartitionValueExtractor partitionValueExtractor;
@@ -83,7 +76,7 @@ public class HoodieHiveClient extends AbstractSyncHoodieClient {
   private HiveConf configuration;
 
   public HoodieHiveClient(HiveSyncConfig cfg, HiveConf configuration, FileSystem fs) {
-    super(cfg.basePath, cfg.assumeDatePartitioning, fs);
+    super(cfg.basePath, cfg.assumeDatePartitioning, cfg.useFileListingFromMetadata, cfg.verifyMetadataFileListing, fs);
     this.syncConfig = cfg;
     this.fs = fs;
 
@@ -172,7 +165,17 @@ public class HoodieHiveClient extends AbstractSyncHoodieClient {
             + ". Check partition strategy. ");
     List<String> partBuilder = new ArrayList<>();
     for (int i = 0; i < syncConfig.partitionFields.size(); i++) {
-      partBuilder.add("`" + syncConfig.partitionFields.get(i) + "`='" + partitionValues.get(i) + "'");
+      String partitionValue = partitionValues.get(i);
+      // decode the partition before sync to hive to prevent multiple escapes of HIVE
+      if (syncConfig.decodePartition) {
+        try {
+          // This is a decode operator for encode in KeyGenUtils#getRecordPartitionPath
+          partitionValue = URLDecoder.decode(partitionValue, StandardCharsets.UTF_8.toString());
+        } catch (UnsupportedEncodingException e) {
+          throw new HoodieHiveSyncException("error in decode partition: " + partitionValue, e);
+        }
+      }
+      partBuilder.add("`" + syncConfig.partitionFields.get(i) + "`='" + partitionValue + "'");
     }
     return String.join(",", partBuilder);
   }
@@ -204,7 +207,6 @@ public class HoodieHiveClient extends AbstractSyncHoodieClient {
     Map<String, String> paths = new HashMap<>();
     for (Partition tablePartition : tablePartitions) {
       List<String> hivePartitionValues = tablePartition.getValues();
-      Collections.sort(hivePartitionValues);
       String fullTablePartitionPath =
           Path.getPathWithoutSchemeAndAuthority(new Path(tablePartition.getSd().getLocation())).toUri().getPath();
       paths.put(String.join(", ", hivePartitionValues), fullTablePartitionPath);
@@ -216,7 +218,6 @@ public class HoodieHiveClient extends AbstractSyncHoodieClient {
       String fullStoragePartitionPath = Path.getPathWithoutSchemeAndAuthority(storagePartitionPath).toUri().getPath();
       // Check if the partition values or if hdfs path is the same
       List<String> storagePartitionValues = partitionValueExtractor.extractPartitionValuesInPath(storagePartition);
-      Collections.sort(storagePartitionValues);
       if (!storagePartitionValues.isEmpty()) {
         String storageValue = String.join(", ", storagePartitionValues);
         if (!paths.containsKey(storageValue)) {
@@ -238,7 +239,7 @@ public class HoodieHiveClient extends AbstractSyncHoodieClient {
 
   void updateTableDefinition(String tableName, MessageType newSchema) {
     try {
-      String newSchemaStr = HiveSchemaUtil.generateSchemaString(newSchema, syncConfig.partitionFields);
+      String newSchemaStr = HiveSchemaUtil.generateSchemaString(newSchema, syncConfig.partitionFields, syncConfig.supportTimestamp);
       // Cascade clause should not be present for non-partitioned tables
       String cascadeClause = syncConfig.partitionFields.size() > 0 ? " cascade" : "";
       StringBuilder sqlBuilder = new StringBuilder("ALTER TABLE ").append(HIVE_ESCAPE_CHARACTER)
@@ -337,6 +338,22 @@ public class HoodieHiveClient extends AbstractSyncHoodieClient {
   }
 
   /**
+   * @param databaseName
+   * @return  true if the configured database exists
+   */
+  public boolean doesDataBaseExist(String databaseName) {
+    try {
+      Database database = client.getDatabase(databaseName);
+      if (database != null && databaseName.equals(database.getName())) {
+        return true;
+      }
+    } catch (TException e) {
+      throw new HoodieHiveSyncException("Failed to check if database exists " + databaseName, e);
+    }
+    return false;
+  }
+
+  /**
    * Execute a update in hive metastore with this SQL.
    *
    * @param s SQL to execute
@@ -409,7 +426,7 @@ public class HoodieHiveClient extends AbstractSyncHoodieClient {
   private void createHiveConnection() {
     if (connection == null) {
       try {
-        Class.forName(HiveDriver.class.getCanonicalName());
+        Class.forName("org.apache.hive.jdbc.HiveDriver");
       } catch (ClassNotFoundException e) {
         LOG.error("Unable to load Hive driver class", e);
         return;

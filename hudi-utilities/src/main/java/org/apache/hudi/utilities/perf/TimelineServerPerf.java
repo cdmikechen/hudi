@@ -18,6 +18,9 @@
 
 package org.apache.hudi.utilities.perf;
 
+import org.apache.hudi.client.common.HoodieSparkEngineContext;
+import org.apache.hudi.common.config.HoodieMetadataConfig;
+import org.apache.hudi.common.engine.HoodieEngineContext;
 import org.apache.hudi.common.fs.FSUtils;
 import org.apache.hudi.common.model.FileSlice;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
@@ -82,12 +85,14 @@ public class TimelineServerPerf implements Serializable {
   }
 
   public void run() throws IOException {
-
-    List<String> allPartitionPaths = FSUtils.getAllPartitionPaths(timelineServer.getFs(), cfg.basePath, true);
+    JavaSparkContext jsc = UtilHelpers.buildSparkContext("hudi-view-perf-" + cfg.basePath, cfg.sparkMaster);
+    HoodieSparkEngineContext engineContext = new HoodieSparkEngineContext(jsc);
+    List<String> allPartitionPaths = FSUtils.getAllPartitionPaths(engineContext, cfg.basePath,
+        cfg.useFileListingFromMetadata, cfg.verifyMetadataFileListing, true);
     Collections.shuffle(allPartitionPaths);
     List<String> selected = allPartitionPaths.stream().filter(p -> !p.contains("error")).limit(cfg.maxPartitions)
         .collect(Collectors.toList());
-    JavaSparkContext jsc = UtilHelpers.buildSparkContext("hudi-view-perf-" + cfg.basePath, cfg.sparkMaster);
+
     if (!useExternalTimelineServer) {
       this.timelineServer.startService();
       setHostAddrFromSparkConf(jsc.getConf());
@@ -95,7 +100,7 @@ public class TimelineServerPerf implements Serializable {
       this.hostAddr = cfg.serverHost;
     }
 
-    HoodieTableMetaClient metaClient = new HoodieTableMetaClient(timelineServer.getConf(), cfg.basePath, true);
+    HoodieTableMetaClient metaClient = HoodieTableMetaClient.builder().setConf(timelineServer.getConf()).setBasePath(cfg.basePath).setLoadActiveTimelineOnLoad(true).build();
     SyncableFileSystemView fsView = new RemoteHoodieTableFileSystemView(this.hostAddr, cfg.serverPort, metaClient);
 
     String reportDir = cfg.reportDir;
@@ -132,8 +137,9 @@ public class TimelineServerPerf implements Serializable {
 
   public List<PerfStats> runLookups(JavaSparkContext jsc, List<String> partitionPaths, SyncableFileSystemView fsView,
       int numIterations, int concurrency) {
-    jsc.setJobGroup(this.getClass().getSimpleName(), "Lookup all performance stats");
-    return jsc.parallelize(partitionPaths, cfg.numExecutors).flatMap(p -> {
+    HoodieEngineContext context = new HoodieSparkEngineContext(jsc);
+    context.setJobStatus(this.getClass().getSimpleName(), "Lookup all performance stats");
+    return context.flatMap(partitionPaths, p -> {
       ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(100);
       final List<PerfStats> result = new ArrayList<>();
       final List<ScheduledFuture<PerfStats>> futures = new ArrayList<>();
@@ -141,7 +147,7 @@ public class TimelineServerPerf implements Serializable {
       String fileId = slices.isEmpty() ? "dummyId"
           : slices.get(new Random(Double.doubleToLongBits(Math.random())).nextInt(slices.size())).getFileId();
       IntStream.range(0, concurrency).forEach(i -> futures.add(executor.schedule(() -> runOneRound(fsView, p, fileId,
-              i, numIterations), 0, TimeUnit.NANOSECONDS)));
+          i, numIterations), 0, TimeUnit.NANOSECONDS)));
       futures.forEach(x -> {
         try {
           result.add(x.get());
@@ -151,8 +157,8 @@ public class TimelineServerPerf implements Serializable {
       });
       System.out.println("SLICES are=");
       slices.forEach(s -> System.out.println("\t\tFileSlice=" + s));
-      return result.iterator();
-    }).collect();
+      return result.stream();
+    }, cfg.numExecutors);
   }
 
   private static PerfStats runOneRound(SyncableFileSystemView fsView, String partition, String fileId, int id,
@@ -290,6 +296,12 @@ public class TimelineServerPerf implements Serializable {
 
     @Parameter(names = {"--wait-for-manual-queries", "-ww"})
     public Boolean waitForManualQueries = false;
+
+    @Parameter(names = {"--use-file-listing-from-metadata"}, description = "Fetch file listing from Hudi's metadata")
+    public Boolean useFileListingFromMetadata = HoodieMetadataConfig.DEFAULT_METADATA_ENABLE_FOR_READERS;
+
+    @Parameter(names = {"--verify-metadata-file-listing"}, description = "Verify file listing from Hudi's metadata against file system")
+    public Boolean verifyMetadataFileListing = HoodieMetadataConfig.DEFAULT_METADATA_VALIDATE;
 
     @Parameter(names = {"--help", "-h"})
     public Boolean help = false;

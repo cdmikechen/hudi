@@ -18,7 +18,7 @@
 
 package org.apache.hudi.utilities;
 
-import org.apache.hudi.client.HoodieWriteClient;
+import org.apache.hudi.client.SparkRDDWriteClient;
 import org.apache.hudi.client.WriteStatus;
 import org.apache.hudi.common.config.TypedProperties;
 import org.apache.hudi.common.fs.FSUtils;
@@ -109,36 +109,31 @@ public class HoodieCompactor {
 
   public int compact(int retry) {
     this.fs = FSUtils.getFs(cfg.basePath, jsc.hadoopConfiguration());
-    int ret = -1;
-    try {
-      do {
-        if (cfg.runSchedule) {
-          if (null == cfg.strategyClassName) {
-            throw new IllegalArgumentException("Missing Strategy class name for running compaction");
-          }
-          ret = doSchedule(jsc);
-        } else {
-          ret = doCompact(jsc);
+    int ret = UtilHelpers.retry(retry, () -> {
+      if (cfg.runSchedule) {
+        if (null == cfg.strategyClassName) {
+          throw new IllegalArgumentException("Missing Strategy class name for running compaction");
         }
-      } while (ret != 0 && retry-- > 0);
-    } catch (Throwable t) {
-      LOG.error(t);
-    }
+        return doSchedule(jsc);
+      } else {
+        return doCompact(jsc);
+      }
+    }, "Compact failed");
     return ret;
   }
 
   private int doCompact(JavaSparkContext jsc) throws Exception {
     // Get schema.
     String schemaStr = UtilHelpers.parseSchema(fs, cfg.schemaFile);
-    HoodieWriteClient client =
+    SparkRDDWriteClient client =
         UtilHelpers.createHoodieClient(jsc, cfg.basePath, schemaStr, cfg.parallelism, Option.empty(), props);
-    JavaRDD<WriteStatus> writeResponse = client.compact(cfg.compactionInstantTime);
+    JavaRDD<WriteStatus> writeResponse = (JavaRDD<WriteStatus>) client.compact(cfg.compactionInstantTime);
     return UtilHelpers.handleErrors(jsc, cfg.compactionInstantTime, writeResponse);
   }
 
   private int doSchedule(JavaSparkContext jsc) throws Exception {
     // Get schema.
-    HoodieWriteClient client =
+    SparkRDDWriteClient client =
         UtilHelpers.createHoodieClient(jsc, cfg.basePath, "", cfg.parallelism, Option.of(cfg.strategyClassName), props);
     client.scheduleCompactionAtInstant(cfg.compactionInstantTime, Option.empty());
     return 0;
