@@ -74,6 +74,10 @@ public class HoodieHiveUtils {
   public static final int DEFAULT_LEVELS_TO_BASEPATH = 3;
   public static final Pattern HOODIE_CONSUME_MODE_PATTERN_STRING = Pattern.compile("hoodie\\.(.*)\\.consume\\.mode");
 
+  public static final String HUDI_TIMESTAMP_LOGICAL_TYPE_KEY = "timestamp_logical_type";
+  public static final String HUDI_TIMESTAMP_LOGICAL_TYPE_VALUE = "timestamp-micros";
+  public static final String HIVE_DEFAULT_TIMESTAMP_LOGICAL_TYPE_VALUE = "timestamp-millis";
+
   public static boolean stopAtCompaction(JobContext job, String tableName) {
     String compactionPropName = String.format(HOODIE_STOP_AT_COMPACTION_PATTERN, tableName);
     boolean stopAtCompaction = job.getConfiguration().getBoolean(compactionPropName, true);
